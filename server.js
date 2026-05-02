@@ -171,9 +171,18 @@ async function main() {
   server.listen(PORT, () => {
     const ips = getLocalIPs();
     console.log('\n  CamNet is running\n');
-    console.log(`  This machine:  https://localhost:${PORT}`);
-    ips.forEach(ip => console.log(`  Other devices: https://${ip}:${PORT}`));
-    console.log('\n  On each phone: open the URL above → tap Advanced → Proceed (once only)\n');
+    console.log(`  On THIS device:  https://localhost:${PORT}`);
+
+    if (ips.length === 0) {
+      console.log('\n  No network interfaces found — are you on WiFi?\n');
+    } else if (ips.length === 1) {
+      console.log(`\n  Open on phones:  https://${ips[0]}:${PORT}`);
+      console.log('  (first visit: tap Advanced → Proceed)\n');
+    } else {
+      console.log('\n  Open on phones — pick the one that matches your WiFi network:');
+      ips.forEach(ip => console.log(`    https://${ip}:${PORT}`));
+      console.log('  (first visit on each phone: tap Advanced → Proceed)\n');
+    }
   });
 
   // HTTP → HTTPS redirect (best-effort, ignore if port is taken)
