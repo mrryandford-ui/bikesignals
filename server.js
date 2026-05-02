@@ -62,7 +62,7 @@ function handle(ws, msg) {
       rooms.set(id, { viewer: ws, cameras: new Map() });
       ws.roomId = id;
       ws.role   = 'viewer';
-      send(ws, { type: 'room-created', roomId: id });
+      send(ws, { type: 'room-created', roomId: id, lanIP: getLocalIPs()[0] || null });
       break;
     }
 

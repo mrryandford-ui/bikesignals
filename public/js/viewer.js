@@ -10,6 +10,7 @@ const ICE_SERVERS = [
 // ── State ──────────────────────────────────────────────────────
 let ws = null;
 let roomId = null;
+let joinURL = null; // full URL camera phones should open (uses LAN IP, not localhost)
 const peers = new Map(); // cameraId → { pc, name, stream, recorder, motion, ... }
 
 let globalMotion = false;
@@ -62,7 +63,7 @@ function setWsStatus(state) {
 // ── Message handler ────────────────────────────────────────────
 async function onMessage(msg) {
   switch (msg.type) {
-    case 'room-created':   onRoomCreated(msg.roomId);            break;
+    case 'room-created':   onRoomCreated(msg.roomId, msg.lanIP); break;
     case 'camera-joined':  onCameraJoined(msg.cameraId, msg.cameraName); break;
     case 'camera-left':    onCameraLeft(msg.cameraId);           break;
     case 'offer':          await handleOffer(msg);               break;
@@ -73,16 +74,21 @@ async function onMessage(msg) {
 }
 
 // ── Room created ───────────────────────────────────────────────
-function onRoomCreated(id) {
+function onRoomCreated(id, lanIP) {
   roomId = id;
+  // Build join URL using the server's LAN IP so the QR works on other phones.
+  // Fall back to location.origin if the server didn't supply one (e.g. WAN deploy).
+  const port = location.port ? `:${location.port}` : '';
+  const base = lanIP ? `${location.protocol}//${lanIP}${port}` : location.origin;
+  joinURL = `${base}/?room=${id}`;
+
   document.getElementById('roomCode').textContent = id;
   document.getElementById('panelRoomCode').textContent = id;
-  buildQR(id);
+  buildQR(joinURL);
   document.getElementById('emptyState').classList.remove('hidden');
 }
 
-function buildQR(id) {
-  const url = `${location.origin}/?room=${id}`;
+function buildQR(url) {
   ['qrContainer', 'panelQr'].forEach(elId => {
     const el = document.getElementById(elId);
     el.innerHTML = '';
@@ -511,9 +517,9 @@ document.getElementById('layoutSeg').addEventListener('click', (e) => {
 
 // Session panel actions
 document.getElementById('copyCodeBtn').addEventListener('click',    () => copyToClipboard(roomId, 'Code copied!'));
-document.getElementById('copyLinkBtn').addEventListener('click',    () => copyToClipboard(`${location.origin}/?room=${roomId}`, 'Link copied!'));
+document.getElementById('copyLinkBtn').addEventListener('click',    () => copyToClipboard(joinURL, 'Link copied!'));
 document.getElementById('panelCopyCode').addEventListener('click',  () => copyToClipboard(roomId, 'Code copied!'));
-document.getElementById('panelCopyLink').addEventListener('click',  () => copyToClipboard(`${location.origin}/?room=${roomId}`, 'Link copied!'));
+document.getElementById('panelCopyLink').addEventListener('click',  () => copyToClipboard(joinURL, 'Link copied!'));
 document.getElementById('newSessionBtn').addEventListener('click',  () => {
   closePanel('sessionPanel');
   wsSend({ type: 'create-room' });
