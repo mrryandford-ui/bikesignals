@@ -607,6 +607,18 @@ function escHtml(s) {
 // /api/info is excluded from SW cache so this is always fresh.
 fetch('/api/info')
   .then(r => r.json())
-  .then(d => { if (d.lanIP) window._lanIP = d.lanIP; })
+  .then(d => {
+    if (d.lanIP) {
+      window._lanIP = d.lanIP;
+      // Show the server URL immediately so camera phones can type it manually
+      const port = location.port ? `:${location.port}` : '';
+      const url  = `${location.protocol}//${d.lanIP}${port}`;
+      const box  = document.getElementById('serverUrlBox');
+      const disp = document.getElementById('serverUrlDisplay');
+      disp.textContent = url;
+      disp.addEventListener('click', () => copyToClipboard(joinURL || url, 'Link copied!'));
+      box.style.display = 'block';
+    }
+  })
   .catch(() => {})
   .finally(() => connectWS());

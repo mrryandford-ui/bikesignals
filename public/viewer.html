@@ -37,6 +37,11 @@
       <div class="session-label">Session Code</div>
       <div class="room-code" id="roomCode">------</div>
       <div id="qrContainer"></div>
+      <div class="server-url-box" id="serverUrlBox" style="display:none">
+        <div class="session-label" style="margin-bottom:4px">Camera phones open this URL</div>
+        <div id="serverUrlDisplay" style="font-size:13px;font-weight:700;color:var(--accent);word-break:break-all;text-align:center;padding:8px 12px;background:rgba(59,130,246,0.08);border-radius:8px;cursor:pointer" title="Tap to copy"></div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:4px;text-align:center">tap to copy · or scan QR above</div>
+      </div>
       <p class="session-hint">Open CamNet on other phones, choose <strong>Camera</strong>, and enter this code</p>
       <div class="session-actions">
         <button class="btn btn-outline" id="copyCodeBtn">📋 Copy code</button>
