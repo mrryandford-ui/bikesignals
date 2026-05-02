@@ -63,7 +63,7 @@ function setWsStatus(state) {
 // ── Message handler ────────────────────────────────────────────
 async function onMessage(msg) {
   switch (msg.type) {
-    case 'room-created':   onRoomCreated(msg.roomId, msg.lanIP); break;
+    case 'room-created':   onRoomCreated(msg.roomId); break;
     case 'camera-joined':  onCameraJoined(msg.cameraId, msg.cameraName); break;
     case 'camera-left':    onCameraLeft(msg.cameraId);           break;
     case 'offer':          await handleOffer(msg);               break;
@@ -74,12 +74,11 @@ async function onMessage(msg) {
 }
 
 // ── Room created ───────────────────────────────────────────────
-function onRoomCreated(id, lanIP) {
+function onRoomCreated(id) {
   roomId = id;
-  // Build join URL using the server's LAN IP so the QR works on other phones.
-  // Fall back to location.origin if the server didn't supply one (e.g. WAN deploy).
   const port = location.port ? `:${location.port}` : '';
-  const base = lanIP ? `${location.protocol}//${lanIP}${port}` : location.origin;
+  const ip   = window._lanIP;
+  const base = ip ? `${location.protocol}//${ip}${port}` : location.origin;
   joinURL = `${base}/?room=${id}`;
 
   document.getElementById('roomCode').textContent = id;
@@ -604,4 +603,10 @@ function escHtml(s) {
 }
 
 // ── Boot ───────────────────────────────────────────────────────
-connectWS();
+// Fetch LAN IP before connecting so the QR is correct from the start.
+// /api/info is excluded from SW cache so this is always fresh.
+fetch('/api/info')
+  .then(r => r.json())
+  .then(d => { if (d.lanIP) window._lanIP = d.lanIP; })
+  .catch(() => {})
+  .finally(() => connectWS());

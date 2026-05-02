@@ -1,4 +1,4 @@
-const CACHE = 'camnet-v2';
+const CACHE = 'camnet-v3';
 const PRECACHE = [
   '/',
   '/viewer.html',
@@ -27,7 +27,8 @@ self.addEventListener('fetch', (e) => {
   // Only cache GET requests for same-origin static assets; skip WebSocket upgrades
   if (e.request.method !== 'GET') return;
   const url = new URL(e.request.url);
-  if (url.pathname.startsWith('/ws') || url.protocol === 'ws:' || url.protocol === 'wss:') return;
+  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/ws')
+      || url.protocol === 'ws:' || url.protocol === 'wss:') return;
 
   e.respondWith(
     caches.match(e.request).then(cached => {

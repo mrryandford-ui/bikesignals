@@ -150,6 +150,12 @@ function getLocalIPs() {
 async function main() {
   const tls  = await getCert();
   const app  = express();
+
+  // Never cache this — viewer.js fetches it to get the real LAN IP
+  app.get('/api/info', (req, res) => {
+    res.json({ lanIP: getLocalIPs()[0] || null });
+  });
+
   app.use(express.static(path.join(__dirname, 'public')));
 
   const server = https.createServer(tls, app);
