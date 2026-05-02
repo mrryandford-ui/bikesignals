@@ -130,10 +130,20 @@ function cleanup(ws) {
 
 // ── Helpers ────────────────────────────────────────────────────
 function getLocalIPs() {
-  return Object.values(os.networkInterfaces())
-    .flat()
-    .filter(i => i && !i.internal && i.family === 'IPv4')
-    .map(i => i.address);
+  const ifaces = os.networkInterfaces();
+  const all = Object.entries(ifaces)
+    .flatMap(([name, addrs]) => (addrs || []).map(a => ({ ...a, name })))
+    .filter(i => !i.internal && i.family === 'IPv4');
+
+  // Prefer WiFi (wlan0 on Android/Linux, en0/en1 on Mac)
+  // Private ranges: 192.168.x.x, 10.x.x.x, 172.16-31.x.x
+  const isPrivate = ip =>
+    /^192\.168\./.test(ip) || /^10\./.test(ip) || /^172\.(1[6-9]|2\d|3[01])\./.test(ip);
+
+  const wifi   = all.filter(i => /wlan|en[0-9]|wifi/i.test(i.name) && isPrivate(i.address));
+  const priv   = all.filter(i => isPrivate(i.address));
+  const chosen = wifi.length ? wifi : priv.length ? priv : all;
+  return [...new Set(chosen.map(i => i.address))];
 }
 
 // ── Main ───────────────────────────────────────────────────────
@@ -170,19 +180,33 @@ async function main() {
 
   server.listen(PORT, () => {
     const ips = getLocalIPs();
-    console.log('\n  CamNet is running\n');
-    console.log(`  On THIS device:  https://localhost:${PORT}`);
+    const shareURL = ips.length ? `https://${ips[0]}:${PORT}` : null;
 
-    if (ips.length === 0) {
-      console.log('\n  No network interfaces found — are you on WiFi?\n');
-    } else if (ips.length === 1) {
-      console.log(`\n  Open on phones:  https://${ips[0]}:${PORT}`);
-      console.log('  (first visit: tap Advanced → Proceed)\n');
+    console.log('\n┌─────────────────────────────────────────────┐');
+    console.log('│              CamNet is running              │');
+    console.log('├─────────────────────────────────────────────┤');
+    console.log('│                                             │');
+    console.log('│  SERVER PHONE (this one, in Termux)         │');
+    console.log('│  Open browser → https://localhost:' + PORT + '      │');
+    console.log('│  Choose: Monitor                            │');
+    console.log('│                                             │');
+    if (shareURL) {
+      console.log('│  CAMERA PHONES (every other phone)          │');
+      console.log('│  Open browser →  ' + shareURL.padEnd(27) + '│');
+      console.log('│  Choose: Camera, enter the room code        │');
+      console.log('│                                             │');
     } else {
-      console.log('\n  Open on phones — pick the one that matches your WiFi network:');
-      ips.forEach(ip => console.log(`    https://${ip}:${PORT}`));
-      console.log('  (first visit on each phone: tap Advanced → Proceed)\n');
+      console.log('│  ⚠  No WiFi IP found — connect to WiFi      │');
+      console.log('│                                             │');
     }
+    console.log('│  First visit only: Advanced → Proceed       │');
+    console.log('│                                             │');
+    if (ips.length > 1) {
+      console.log('│  Extra IPs detected (ignore these):         │');
+      ips.slice(1).forEach(ip => console.log('│    ' + ip.padEnd(41) + '│'));
+      console.log('│                                             │');
+    }
+    console.log('└─────────────────────────────────────────────┘\n');
   });
 
   // HTTP → HTTPS redirect (best-effort, ignore if port is taken)
