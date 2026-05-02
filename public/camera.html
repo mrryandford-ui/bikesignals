@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <title>CamNet – Camera</title>
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#090910">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+<div class="camera-app" id="app">
+
+  <!-- Setup screen -->
+  <div class="setup-screen" id="setupScreen">
+    <div class="setup-title">
+      <h1>📷 Join Session</h1>
+      <p>Enter the code shown on the monitor</p>
+    </div>
+
+    <div class="setup-form">
+      <div>
+        <div class="field-label">Session Code</div>
+        <div class="code-input-row">
+          <input type="text" id="codeInput" placeholder="XXXXXX" maxlength="6"
+            autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false">
+        </div>
+      </div>
+
+      <div>
+        <div class="field-label">Camera Name <span style="color:var(--text-muted);font-weight:400;text-transform:none">(optional)</span></div>
+        <input type="text" id="nameInput" placeholder="e.g. Front Door" maxlength="30">
+      </div>
+
+      <div id="errorMsg" class="error-msg"></div>
+
+      <button class="btn btn-success" id="joinBtn" style="width:100%;margin-top:4px;">
+        Join →
+      </button>
+    </div>
+  </div>
+
+  <!-- Live / streaming screen -->
+  <div class="live-screen hidden" id="liveScreen">
+    <div class="live-preview-wrap">
+      <video id="localVideo" autoplay playsinline muted></video>
+
+      <div class="live-status-bar">
+        <span class="live-badge">LIVE</span>
+        <span class="live-room" id="liveRoomCode">------</span>
+        <div class="live-conn-status">
+          <span class="dot connecting" id="connDot"></span>
+          <span id="connText">Waiting…</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="cam-bottom-bar">
+      <div class="cam-bottom-row">
+        <button class="cam-ctrl-btn" id="micBtn">
+          <div class="ctrl-icon">🎙️</div>
+          <span>Mic</span>
+        </button>
+        <button class="cam-ctrl-btn" id="flipBtn">
+          <div class="ctrl-icon">🔄</div>
+          <span>Flip</span>
+        </button>
+        <button class="cam-ctrl-btn" id="torchBtn">
+          <div class="ctrl-icon">🔦</div>
+          <span>Torch</span>
+        </button>
+        <button class="cam-ctrl-btn" id="qualityBtn">
+          <div class="ctrl-icon">🎞️</div>
+          <span id="qualityLabel">720p</span>
+        </button>
+        <button class="cam-ctrl-btn danger" id="hangupBtn" style="color:var(--accent-r)">
+          <div class="ctrl-icon" style="background:rgba(239,68,68,0.15);">✕</div>
+          <span>End</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Quality panel -->
+<div class="panel hidden" id="qualityPanel">
+  <div class="panel-backdrop" id="qualityBackdrop"></div>
+  <div class="panel-sheet">
+    <div class="panel-handle"></div>
+    <div class="panel-title">Video Quality</div>
+    <div class="quality-list" id="qualityList">
+      <div class="quality-item" data-q="240">
+        <span class="q-name">240p</span>
+        <span class="q-desc">Low bandwidth</span>
+      </div>
+      <div class="quality-item" data-q="480">
+        <span class="q-name">480p</span>
+        <span class="q-desc">Balanced</span>
+      </div>
+      <div class="quality-item selected" data-q="720">
+        <span class="q-name">720p</span>
+        <span class="q-desc">HD (default)</span>
+      </div>
+      <div class="quality-item" data-q="1080">
+        <span class="q-name">1080p</span>
+        <span class="q-desc">Full HD</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/js/camera.js"></script>
+</body>
+</html>

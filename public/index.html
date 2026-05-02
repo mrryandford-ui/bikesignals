@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <title>CamNet</title>
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#090910">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="CamNet">
+  <link rel="icon" href="/icons/icon-192.png">
+  <link rel="apple-touch-icon" href="/icons/icon-192.png">
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+  <div class="home-page">
+    <div class="home-logo">📹</div>
+    <h1 class="home-title">CamNet</h1>
+    <p class="home-sub">Multi-phone camera monitor</p>
+
+    <div class="home-cards">
+      <a href="/viewer.html" class="role-card viewer">
+        <div class="role-icon">🖥️</div>
+        <div>
+          <h2>Monitor</h2>
+          <p>Watch multiple camera feeds</p>
+        </div>
+        <span class="role-arrow">›</span>
+      </a>
+
+      <a href="/camera.html" class="role-card camera">
+        <div class="role-icon">📷</div>
+        <div>
+          <h2>Camera</h2>
+          <p>Stream your camera to a session</p>
+        </div>
+        <span class="role-arrow">›</span>
+      </a>
+    </div>
+  </div>
+
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
+    }
+    // If opened with ?room=XXXX, go straight to camera join
+    const params = new URLSearchParams(location.search);
+    if (params.get('room')) {
+      location.href = '/camera.html?room=' + encodeURIComponent(params.get('room'));
+    }
+  </script>
+</body>
+</html>

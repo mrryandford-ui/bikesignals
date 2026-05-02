@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <title>CamNet – Monitor</title>
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#090910">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+<div class="viewer-app" id="app">
+
+  <!-- Header -->
+  <header class="viewer-header">
+    <a href="/" class="icon-btn" title="Home" style="background:transparent;color:var(--text-dim);font-size:20px;">‹</a>
+    <span class="header-brand">CamNet</span>
+    <span class="cam-count-badge" id="camCountBadge">0 cameras</span>
+    <div class="header-spacer"></div>
+    <div class="ws-status" id="wsStatus">
+      <span class="dot connecting" id="wsStatusDot"></span>
+      <span id="wsStatusText">Connecting…</span>
+    </div>
+    <button class="icon-btn" id="layoutBtn" title="Change layout">⊞</button>
+    <button class="icon-btn" id="sessionBtn" title="Session info">🔑</button>
+    <button class="icon-btn" id="settingsBtn" title="Settings">⚙</button>
+  </header>
+
+  <!-- Feed grid (hidden until cameras join) -->
+  <main class="feed-grid l-auto hidden" id="feedGrid"></main>
+
+  <!-- Empty / waiting state -->
+  <div class="empty-state" id="emptyState">
+    <div class="session-box">
+      <div class="session-label">Session Code</div>
+      <div class="room-code" id="roomCode">------</div>
+      <div id="qrContainer"></div>
+      <p class="session-hint">Open CamNet on other phones, choose <strong>Camera</strong>, and enter this code</p>
+      <div class="session-actions">
+        <button class="btn btn-outline" id="copyCodeBtn">📋 Copy code</button>
+        <button class="btn btn-outline" id="copyLinkBtn">🔗 Copy link</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ── Panels ──────────────────────────────────────────────── -->
+
+<!-- Session info panel -->
+<div class="panel hidden" id="sessionPanel">
+  <div class="panel-backdrop" data-close="sessionPanel"></div>
+  <div class="panel-sheet">
+    <div class="panel-handle"></div>
+    <div class="panel-title">Session</div>
+    <div class="panel-row">
+      <span class="panel-label">Room code</span>
+      <span id="panelRoomCode" style="font-size:22px;font-weight:900;letter-spacing:4px;color:var(--accent)">------</span>
+    </div>
+    <div class="panel-row">
+      <span class="panel-label">QR code</span>
+      <div id="panelQr" style="background:#fff;border-radius:8px;padding:8px;"></div>
+    </div>
+    <div style="margin-top:16px;display:flex;flex-direction:column;gap:8px;">
+      <button class="btn btn-outline" id="panelCopyCode">📋 Copy code</button>
+      <button class="btn btn-outline" id="panelCopyLink">🔗 Copy join link</button>
+      <button class="btn btn-ghost" id="newSessionBtn">↺ New session</button>
+    </div>
+  </div>
+</div>
+
+<!-- Layout panel -->
+<div class="panel hidden" id="layoutPanel">
+  <div class="panel-backdrop" data-close="layoutPanel"></div>
+  <div class="panel-sheet">
+    <div class="panel-handle"></div>
+    <div class="panel-title">Layout</div>
+    <div class="panel-row">
+      <span class="panel-label">Grid size</span>
+      <div class="seg-ctrl" id="layoutSeg">
+        <button class="seg-btn active" data-layout="l-auto">Auto</button>
+        <button class="seg-btn" data-layout="l-1">1</button>
+        <button class="seg-btn" data-layout="l-2">2</button>
+        <button class="seg-btn" data-layout="l-3">3</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Settings panel -->
+<div class="panel hidden" id="settingsPanel">
+  <div class="panel-backdrop" data-close="settingsPanel"></div>
+  <div class="panel-sheet">
+    <div class="panel-handle"></div>
+    <div class="panel-title">Settings</div>
+    <div class="panel-row">
+      <span class="panel-label">Motion detection</span>
+      <button class="toggle" id="globalMotionToggle" aria-label="Motion detection"></button>
+    </div>
+    <div class="panel-row" id="motionSensRow">
+      <span class="panel-label">Motion sensitivity</span>
+      <div class="seg-ctrl" id="motionSensSeg">
+        <button class="seg-btn" data-sens="low">Low</button>
+        <button class="seg-btn active" data-sens="mid">Mid</button>
+        <button class="seg-btn" data-sens="high">High</button>
+      </div>
+    </div>
+    <div class="panel-row">
+      <span class="panel-label">Mute all audio</span>
+      <button class="toggle" id="muteAllToggle" aria-label="Mute all"></button>
+    </div>
+    <div class="panel-row">
+      <span class="panel-label">Mirror front cameras</span>
+      <button class="toggle on" id="mirrorToggle" aria-label="Mirror front cameras"></button>
+    </div>
+  </div>
+</div>
+
+<!-- Rename camera dialog -->
+<div class="panel hidden" id="renamePanel">
+  <div class="panel-backdrop" data-close="renamePanel"></div>
+  <div class="panel-sheet">
+    <div class="panel-handle"></div>
+    <div class="panel-title">Rename Camera</div>
+    <input type="text" id="renameInput" placeholder="Camera name" maxlength="30" style="margin-bottom:14px;">
+    <button class="btn btn-primary" id="renameConfirmBtn" style="width:100%;">Save</button>
+  </div>
+</div>
+
+<!-- QR / qrcode.js lib -->
+<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+<script src="/js/viewer.js"></script>
+</body>
+</html>
