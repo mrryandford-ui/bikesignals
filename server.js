@@ -1,24 +1,50 @@
-const express = require('express');
+'use strict';
+
+const express    = require('express');
 const { WebSocketServer } = require('ws');
-const http = require('http');
-const path = require('path');
+const https      = require('https');
+const http       = require('http');
+const path       = require('path');
+const fs         = require('fs');
+const selfsigned = require('selfsigned');
+const os         = require('os');
 
-const app = express();
-const server = http.createServer(app);
-const wss = new WebSocketServer({ server });
+// ── TLS cert (generated once, reused forever) ──────────────────
+const CERT_DIR  = path.join(__dirname, '.certs');
+const CERT_FILE = path.join(CERT_DIR, 'cert.pem');
+const KEY_FILE  = path.join(CERT_DIR, 'key.pem');
 
-app.use(express.static(path.join(__dirname, 'public')));
+async function getCert() {
+  if (fs.existsSync(CERT_FILE) && fs.existsSync(KEY_FILE)) {
+    return { cert: fs.readFileSync(CERT_FILE), key: fs.readFileSync(KEY_FILE) };
+  }
 
-// rooms: Map<roomId, { viewer: ws, cameras: Map<cameraId, ws> }>
+  console.log('Generating self-signed certificate (one-time)…');
+  fs.mkdirSync(CERT_DIR, { recursive: true });
+
+  const localIPs = getLocalIPs();
+  const altNames = [
+    { type: 2, value: 'localhost' },
+    { type: 7, ip: '127.0.0.1' },
+    ...localIPs.map(ip => ({ type: 7, ip })),
+  ];
+
+  const pems = await selfsigned.generate([{ name: 'commonName', value: 'CamNet' }], {
+    days: 3650,
+    extensions: [{ name: 'subjectAltName', altNames }],
+  });
+
+  fs.writeFileSync(CERT_FILE, pems.cert,    { mode: 0o600 });
+  fs.writeFileSync(KEY_FILE,  pems.private, { mode: 0o600 });
+  return { cert: pems.cert, key: pems.private };
+}
+
+// ── Room state ─────────────────────────────────────────────────
 const rooms = new Map();
 
-function uid() {
-  return Math.random().toString(36).slice(2, 10);
-}
+function uid() { return Math.random().toString(36).slice(2, 10); }
 
-function roomCode() {
-  return Math.random().toString(36).slice(2, 8).toUpperCase();
-}
+function roomCode() { return Math.random().toString(36).slice(2, 8).toUpperCase(); }
 
 function send(ws, obj) {
   if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj));
@@ -28,7 +54,6 @@ function handle(ws, msg) {
   switch (msg.type) {
 
     case 'create-room': {
-      // Clean up any existing room this viewer had
       if (ws.roomId) {
         const old = rooms.get(ws.roomId);
         if (old && old.viewer === ws) rooms.delete(ws.roomId);
@@ -36,28 +61,27 @@ function handle(ws, msg) {
       const id = roomCode();
       rooms.set(id, { viewer: ws, cameras: new Map() });
       ws.roomId = id;
-      ws.role = 'viewer';
+      ws.role   = 'viewer';
       send(ws, { type: 'room-created', roomId: id });
       break;
     }
 
     case 'join-room': {
       const roomId = (msg.roomId || '').toUpperCase().trim();
-      const room = rooms.get(roomId);
+      const room   = rooms.get(roomId);
       if (!room) {
         send(ws, { type: 'error', code: 'NO_ROOM', message: 'Room not found. Check the code and try again.' });
         return;
       }
-      ws.roomId = roomId;
-      ws.role = 'camera';
+      ws.roomId     = roomId;
+      ws.role       = 'camera';
       ws.cameraName = (msg.cameraName || '').trim() || `Camera ${room.cameras.size + 1}`;
       room.cameras.set(ws.id, ws);
-      send(ws, { type: 'joined', cameraId: ws.id, cameraName: ws.cameraName });
+      send(ws,          { type: 'joined',        cameraId: ws.id, cameraName: ws.cameraName });
       send(room.viewer, { type: 'camera-joined', cameraId: ws.id, cameraName: ws.cameraName });
       break;
     }
 
-    // WebRTC signaling – relay between camera and viewer
     case 'offer':
     case 'answer':
     case 'ice-candidate': {
@@ -66,22 +90,18 @@ function handle(ws, msg) {
       if (ws.role === 'camera') {
         send(room.viewer, { ...msg, cameraId: ws.id });
       } else if (ws.role === 'viewer') {
-        const cam = room.cameras.get(msg.cameraId);
-        send(cam, msg);
+        send(room.cameras.get(msg.cameraId), msg);
       }
       break;
     }
 
-    // Viewer sending commands to a camera (switch cam, mute, quality, torch)
     case 'camera-command': {
       const room = rooms.get(ws.roomId);
       if (!room || ws.role !== 'viewer') return;
-      const cam = room.cameras.get(msg.cameraId);
-      send(cam, msg);
+      send(room.cameras.get(msg.cameraId), msg);
       break;
     }
 
-    // Camera sending status updates to viewer (facingMode, muted, torch, quality)
     case 'camera-status': {
       const room = rooms.get(ws.roomId);
       if (!room || ws.role !== 'camera') return;
@@ -89,11 +109,9 @@ function handle(ws, msg) {
       break;
     }
 
-    // Camera pinging to keep connection alive / show latency
-    case 'ping': {
+    case 'ping':
       send(ws, { type: 'pong', ts: msg.ts });
       break;
-    }
   }
 }
 
@@ -101,7 +119,6 @@ function cleanup(ws) {
   if (!ws.roomId) return;
   const room = rooms.get(ws.roomId);
   if (!room) return;
-
   if (ws.role === 'viewer') {
     room.cameras.forEach(cam => send(cam, { type: 'viewer-disconnected' }));
     rooms.delete(ws.roomId);
@@ -111,32 +128,60 @@ function cleanup(ws) {
   }
 }
 
-wss.on('connection', (ws) => {
-  ws.id = uid();
-  ws.alive = true;
+// ── Helpers ────────────────────────────────────────────────────
+function getLocalIPs() {
+  return Object.values(os.networkInterfaces())
+    .flat()
+    .filter(i => i && !i.internal && i.family === 'IPv4')
+    .map(i => i.address);
+}
 
-  ws.on('pong', () => { ws.alive = true; });
-  ws.on('message', (raw) => {
-    let msg;
-    try { msg = JSON.parse(raw); } catch { return; }
-    handle(ws, msg);
+// ── Main ───────────────────────────────────────────────────────
+async function main() {
+  const tls  = await getCert();
+  const app  = express();
+  app.use(express.static(path.join(__dirname, 'public')));
+
+  const server = https.createServer(tls, app);
+  const wss    = new WebSocketServer({ server });
+
+  wss.on('connection', (ws) => {
+    ws.id    = uid();
+    ws.alive = true;
+    ws.on('pong',    ()    => { ws.alive = true; });
+    ws.on('message', (raw) => {
+      let msg; try { msg = JSON.parse(raw); } catch { return; }
+      handle(ws, msg);
+    });
+    ws.on('close', () => cleanup(ws));
+    ws.on('error', () => cleanup(ws));
   });
-  ws.on('close', () => cleanup(ws));
-  ws.on('error', () => cleanup(ws));
-});
 
-// Heartbeat – terminate dead connections
-const heartbeat = setInterval(() => {
-  wss.clients.forEach(ws => {
-    if (!ws.alive) { ws.terminate(); return; }
-    ws.alive = false;
-    ws.ping();
+  const heartbeat = setInterval(() => {
+    wss.clients.forEach(ws => {
+      if (!ws.alive) { ws.terminate(); return; }
+      ws.alive = false;
+      ws.ping();
+    });
+  }, 30000);
+  wss.on('close', () => clearInterval(heartbeat));
+
+  const PORT = parseInt(process.env.PORT || '3000', 10);
+
+  server.listen(PORT, () => {
+    const ips = getLocalIPs();
+    console.log('\n  CamNet is running\n');
+    console.log(`  This machine:  https://localhost:${PORT}`);
+    ips.forEach(ip => console.log(`  Other devices: https://${ip}:${PORT}`));
+    console.log('\n  On each phone: open the URL above → tap Advanced → Proceed (once only)\n');
   });
-}, 30000);
 
-wss.on('close', () => clearInterval(heartbeat));
+  // HTTP → HTTPS redirect (best-effort, ignore if port is taken)
+  http.createServer((req, res) => {
+    const host = (req.headers.host || '').replace(/:\d+$/, '');
+    res.writeHead(301, { Location: `https://${host}:${PORT}${req.url}` });
+    res.end();
+  }).listen(PORT + 1).on('error', () => {});
+}
 
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`CamNet running → http://localhost:${PORT}`);
-});
+main().catch(err => { console.error(err); process.exit(1); });
