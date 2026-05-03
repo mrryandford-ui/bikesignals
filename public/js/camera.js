@@ -76,11 +76,9 @@ async function initMedia() {
 
   try {
     localStream = await navigator.mediaDevices.getUserMedia({ video, audio });
-  } catch (err) {
-    // Audio device busy, missing, or denied — fall back to video-only
-    const audioFail = ['NotReadableError', 'NotFoundError', 'OverconstrainedError'].includes(err.name)
-      || (err.name === 'NotAllowedError' && !err.message?.toLowerCase().includes('camera'));
-    if (!audioFail) throw err;
+  } catch {
+    // Any failure with audio — retry video-only. If camera itself is denied this
+    // second call will throw and the error propagates up to the join handler.
     localStream = await navigator.mediaDevices.getUserMedia({ video, audio: false });
     micEnabled = false;
     showToast('Mic unavailable — video only');
