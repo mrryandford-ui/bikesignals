@@ -160,7 +160,14 @@ async function main() {
     res.json({ lanIP, allIPs });
   });
 
-  app.use(express.static(path.join(__dirname, 'public')));
+  // Never cache JS/HTML — WebViews and browsers always get fresh files
+  app.use(express.static(path.join(__dirname, 'public'), {
+    setHeaders(res, filePath) {
+      if (/\.(js|html)$/.test(filePath)) {
+        res.setHeader('Cache-Control', 'no-store');
+      }
+    },
+  }));
 
   const server = https.createServer(tls, app);
   const wss    = new WebSocketServer({ server });
