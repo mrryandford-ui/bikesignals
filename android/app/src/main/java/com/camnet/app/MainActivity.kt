@@ -51,7 +51,17 @@ class MainActivity : AppCompatActivity() {
             }
 
             override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
-                if (request.isForMainFrame) runOnUiThread { showSetup() }
+                if (!request.isForMainFrame) return
+                val url  = request.url?.toString() ?: "unknown"
+                val desc = error.description?.toString() ?: "unknown error"
+                runOnUiThread {
+                    android.widget.Toast.makeText(
+                        this@MainActivity,
+                        "Can't reach server:\n$desc\n$url",
+                        android.widget.Toast.LENGTH_LONG
+                    ).show()
+                    showSetup()
+                }
             }
         }
 
