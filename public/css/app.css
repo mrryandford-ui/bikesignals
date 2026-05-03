@@ -707,8 +707,9 @@ input[type="text"]::placeholder { color: var(--text-muted); }
 }
 .cam-bottom-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  justify-content: space-around;
+  justify-content: center;
   gap: 8px;
 }
 .cam-ctrl-btn {
@@ -722,7 +723,8 @@ input[type="text"]::placeholder { color: var(--text-muted); }
   color: var(--text-dim);
   font-size: 11px;
   font-weight: 600;
-  min-width: 56px;
+  flex: 1 0 30%;
+  max-width: 80px;
   padding: 10px 6px;
   border-radius: var(--radius-sm);
   transition: color 0.15s, background 0.15s;
