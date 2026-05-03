@@ -59,10 +59,34 @@ function handle(ws, msg) {
         if (old && old.viewer === ws) rooms.delete(ws.roomId);
       }
       const id = roomCode();
-      rooms.set(id, { viewer: ws, cameras: new Map() });
+      rooms.set(id, { viewer: ws, cameras: new Map(), _cleanupTimer: null });
       ws.roomId = id;
       ws.role   = 'viewer';
       send(ws, { type: 'room-created', roomId: id, lanIP: getLocalIPs()[0] || null });
+      break;
+    }
+
+    // Viewer reconnecting after a tab-switch / brief disconnect — reattach to existing room
+    case 'rejoin-room': {
+      const roomId = (msg.roomId || '').toUpperCase().trim();
+      const room   = rooms.get(roomId);
+      if (!room) {
+        // Room already expired — treat as a fresh create
+        const id = roomCode();
+        rooms.set(id, { viewer: ws, cameras: new Map(), _cleanupTimer: null });
+        ws.roomId = id;
+        ws.role   = 'viewer';
+        send(ws, { type: 'room-created', roomId: id, lanIP: getLocalIPs()[0] || null });
+        return;
+      }
+      clearTimeout(room._cleanupTimer);
+      room._cleanupTimer = null;
+      room.viewer = ws;
+      ws.roomId   = roomId;
+      ws.role     = 'viewer';
+      send(ws, { type: 'room-rejoined', roomId });
+      // Tell cameras viewer is back — they will re-send their offers
+      room.cameras.forEach(cam => send(cam, { type: 'viewer-reconnected' }));
       break;
     }
 
@@ -120,8 +144,13 @@ function cleanup(ws) {
   const room = rooms.get(ws.roomId);
   if (!room) return;
   if (ws.role === 'viewer') {
-    room.cameras.forEach(cam => send(cam, { type: 'viewer-disconnected' }));
-    rooms.delete(ws.roomId);
+    // Grace period: give the viewer 25 s to reconnect before telling cameras and deleting
+    room._cleanupTimer = setTimeout(() => {
+      if (rooms.get(ws.roomId) === room) {
+        room.cameras.forEach(cam => send(cam, { type: 'viewer-disconnected' }));
+        rooms.delete(ws.roomId);
+      }
+    }, 25_000);
   } else if (ws.role === 'camera') {
     room.cameras.delete(ws.id);
     send(room.viewer, { type: 'camera-left', cameraId: ws.id });

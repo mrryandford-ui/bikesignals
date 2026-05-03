@@ -151,11 +151,21 @@ async function onMessage(msg) {
       break;
 
     case 'viewer-disconnected':
-      setConnStatus('disconnected', 'Viewer disconnected');
+      setConnStatus('disconnected', 'Viewer away — waiting…');
       closePeer();
       break;
 
+    case 'viewer-reconnected':
+      setConnStatus('connecting', 'Viewer reconnected…');
+      await createPeer();
+      break;
+
     case 'error':
+      // Ignore NO_ROOM if we're already on the live screen — viewer may still be reconnecting
+      if (msg.code === 'NO_ROOM' && localStream) {
+        setConnStatus('disconnected', 'Session expired — tap End to restart');
+        return;
+      }
       showError(msg.message || 'Connection error');
       setJoinLoading(false);
       break;

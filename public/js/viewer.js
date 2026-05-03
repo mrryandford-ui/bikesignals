@@ -33,7 +33,11 @@ function connectWS() {
 
   ws.onopen = () => {
     setWsStatus('connected');
-    ws.send(JSON.stringify({ type: 'create-room' }));
+    const saved = sessionStorage.getItem('camnet_room');
+    ws.send(JSON.stringify(saved
+      ? { type: 'rejoin-room', roomId: saved }
+      : { type: 'create-room' }
+    ));
   };
 
   ws.onmessage = (e) => {
@@ -63,19 +67,21 @@ function setWsStatus(state) {
 // ── Message handler ────────────────────────────────────────────
 async function onMessage(msg) {
   switch (msg.type) {
-    case 'room-created':   onRoomCreated(msg.roomId); break;
-    case 'camera-joined':  onCameraJoined(msg.cameraId, msg.cameraName); break;
-    case 'camera-left':    onCameraLeft(msg.cameraId);           break;
-    case 'offer':          await handleOffer(msg);               break;
-    case 'ice-candidate':  await handleIce(msg);                 break;
-    case 'camera-status':  onCameraStatus(msg);                  break;
-    case 'pong':           onPong(msg);                          break;
+    case 'room-created':    onRoomCreated(msg.roomId); break;
+    case 'room-rejoined':   onRoomCreated(msg.roomId); break; // same UI update
+    case 'camera-joined':   onCameraJoined(msg.cameraId, msg.cameraName); break;
+    case 'camera-left':     onCameraLeft(msg.cameraId);           break;
+    case 'offer':           await handleOffer(msg);               break;
+    case 'ice-candidate':   await handleIce(msg);                 break;
+    case 'camera-status':   onCameraStatus(msg);                  break;
+    case 'pong':            onPong(msg);                          break;
   }
 }
 
 // ── Room created ───────────────────────────────────────────────
 function onRoomCreated(id) {
   roomId = id;
+  sessionStorage.setItem('camnet_room', id);
   const port = location.port ? `:${location.port}` : '';
   const ip   = window._lanIP;
   const base = ip ? `${location.protocol}//${ip}${port}` : location.origin;
