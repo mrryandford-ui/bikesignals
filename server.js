@@ -196,26 +196,20 @@ async function main() {
     console.log('│              CamNet is running              │');
     console.log('├─────────────────────────────────────────────┤');
     console.log('│                                             │');
-    console.log('│  SERVER PHONE (this one, in Termux)         │');
-    console.log('│  Open browser → https://localhost:' + PORT + '      │');
-    console.log('│  Choose: Monitor                            │');
-    console.log('│                                             │');
     if (shareURL) {
-      console.log('│  CAMERA PHONES (every other phone)          │');
-      console.log('│  Open browser →  ' + shareURL.padEnd(27) + '│');
-      console.log('│  Choose: Camera, enter the room code        │');
+      console.log('│  ALL PHONES use this URL:                   │');
+      console.log('│  ' + shareURL.padEnd(43) + '│');
       console.log('│                                             │');
+      console.log('│  Server phone  → choose Monitor             │');
+      console.log('│  Camera phones → choose Camera              │');
     } else {
       console.log('│  ⚠  No WiFi IP found — connect to WiFi      │');
-      console.log('│                                             │');
+      console.log('│  Then restart: npm start                    │');
     }
-    console.log('│  First visit only: Advanced → Proceed       │');
     console.log('│                                             │');
-    if (ips.length > 1) {
-      console.log('│  Extra IPs detected (ignore these):         │');
-      ips.slice(1).forEach(ip => console.log('│    ' + ip.padEnd(41) + '│'));
-      console.log('│                                             │');
-    }
+    console.log('│  First visit on each phone:                 │');
+    console.log('│  tap Advanced → Proceed  (once only)        │');
+    console.log('│                                             │');
     console.log('└─────────────────────────────────────────────┘\n');
   });
 
