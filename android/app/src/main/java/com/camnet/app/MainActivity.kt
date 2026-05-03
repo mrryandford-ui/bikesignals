@@ -109,28 +109,35 @@ class MainActivity : AppCompatActivity() {
                min-height:100vh;padding:32px 24px;gap:16px}
           h1{font-size:22px;font-weight:700}
           p{color:#94a3b8;font-size:14px;text-align:center;line-height:1.5;max-width:300px}
-          input{width:100%;padding:14px 16px;font-size:16px;background:#1e293b;color:#f1f5f9;
-                border:1.5px solid #334155;border-radius:14px;outline:none}
-          input:focus{border-color:#3b82f6}
+          .row{display:flex;align-items:center;width:100%;background:#1e293b;
+               border:1.5px solid #334155;border-radius:14px;overflow:hidden}
+          .prefix{padding:14px 0 14px 16px;color:#64748b;font-size:16px;white-space:nowrap;user-select:none}
+          .suffix{padding:14px 16px 14px 0;color:#64748b;font-size:16px;white-space:nowrap;user-select:none}
+          input{flex:1;padding:14px 4px;font-size:16px;background:transparent;color:#f1f5f9;
+                border:none;outline:none;min-width:0}
           button{width:100%;padding:15px;background:#3b82f6;color:#fff;border:none;
                  border-radius:14px;font-size:16px;font-weight:600;cursor:pointer;
                  -webkit-tap-highlight-color:transparent}
           .hint{color:#475569;font-size:12px;text-align:center}
         </style></head><body>
         <h1>CamNet Camera</h1>
-        <p>Enter the URL shown when you run <code>npm start</code> in Termux</p>
-        <input id="url" type="url" placeholder="https://192.168.x.x:3000"
-               autocomplete="off" autocorrect="off" spellcheck="false">
+        <p>Enter the IP address shown when you run <code>npm start</code> in Termux</p>
+        <div class="row">
+          <span class="prefix">https://</span>
+          <input id="ip" type="text" inputmode="decimal" placeholder="192.168.0.43"
+                 autocomplete="off" autocorrect="off" spellcheck="false">
+          <span class="suffix">:3000</span>
+        </div>
         <button onclick="save()">Connect &rarr;</button>
-        <p class="hint">Tap Advanced &rarr; Proceed if your browser warns about the certificate</p>
+        <p class="hint">Allow the certificate warning once — tap Advanced &rarr; Proceed</p>
         <script>
-          document.getElementById('url').focus();
+          document.getElementById('ip').focus();
           function save(){
-            var v=document.getElementById('url').value.trim().replace(/\/+$/,'');
-            if(!v)return;
-            AndroidBridge.setServerUrl(v);
+            var ip=document.getElementById('ip').value.trim().replace(/[\/\s]/g,'');
+            if(!ip)return;
+            AndroidBridge.setServerUrl('https://'+ip+':3000');
           }
-          document.getElementById('url').addEventListener('keydown',function(e){
+          document.getElementById('ip').addEventListener('keydown',function(e){
             if(e.key==='Enter')save();
           });
         </script></body></html>
