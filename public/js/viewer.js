@@ -608,15 +608,40 @@ function escHtml(s) {
 fetch('/api/info')
   .then(r => r.json())
   .then(d => {
-    if (d.lanIP) {
-      window._lanIP = d.lanIP;
-      // Show the server URL immediately so camera phones can type it manually
-      const port = location.port ? `:${location.port}` : '';
-      const url  = `${location.protocol}//${d.lanIP}${port}`;
-      const box  = document.getElementById('serverUrlBox');
-      const disp = document.getElementById('serverUrlDisplay');
-      disp.textContent = url;
-      disp.addEventListener('click', () => copyToClipboard(joinURL || url, 'Link copied!'));
+    const port = location.port ? `:${location.port}` : '';
+    const box  = document.getElementById('serverUrlBox');
+    const disp = document.getElementById('serverUrlDisplay');
+
+    // Use best-guess IP for QR; show ALL detected IPs so user can pick if wrong
+    const ips = d.lanIP
+      ? [d.lanIP, ...(d.allIPs || []).map(i => i.address).filter(a => a !== d.lanIP)]
+      : (d.allIPs || []).map(i => i.address);
+
+    if (ips.length === 0) {
+      disp.textContent = '⚠ No network IP found — are you on WiFi?';
+      disp.style.color = 'var(--accent-r)';
+      box.style.display = 'block';
+    } else {
+      window._lanIP = ips[0];
+      disp.innerHTML = ips.map((ip, i) => {
+        const url = `${location.protocol}//${ip}${port}`;
+        const label = i === 0 ? '✓ ' : '  ';
+        return `<div style="padding:3px 0;cursor:pointer" data-url="${url}">${label}${url}</div>`;
+      }).join('');
+      // Tap any IP line to set it as the active one
+      disp.addEventListener('click', (e) => {
+        const row = e.target.closest('[data-url]');
+        if (!row) return;
+        const chosenURL = row.dataset.url;
+        const chosenIP  = new URL(chosenURL).hostname;
+        window._lanIP   = chosenIP;
+        joinURL = `${chosenURL}/?room=${roomId}`;
+        buildQR(joinURL);
+        // Mark selected
+        disp.querySelectorAll('[data-url]').forEach(r => r.textContent = '  ' + r.dataset.url);
+        row.textContent = '✓ ' + chosenURL;
+        copyToClipboard(joinURL, 'Link copied!');
+      });
       box.style.display = 'block';
     }
   })

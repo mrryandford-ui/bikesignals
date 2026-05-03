@@ -153,7 +153,11 @@ async function main() {
 
   // Never cache this — viewer.js fetches it to get the real LAN IP
   app.get('/api/info', (req, res) => {
-    res.json({ lanIP: getLocalIPs()[0] || null });
+    const allIPs = Object.entries(os.networkInterfaces())
+      .flatMap(([name, addrs]) => (addrs || []).map(a => ({ name, address: a.address, internal: a.internal, family: a.family })))
+      .filter(i => !i.internal && i.family === 'IPv4');
+    const lanIP = getLocalIPs()[0] || null;
+    res.json({ lanIP, allIPs });
   });
 
   app.use(express.static(path.join(__dirname, 'public')));
