@@ -5,16 +5,18 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.*
+import android.util.Log
 import androidx.core.app.NotificationCompat
 
 /**
- * Foreground service that declares camera + microphone usage so Android
- * keeps the process alive and camera hardware accessible while the screen is off.
+ * Foreground service declaring camera + microphone usage so Android keeps
+ * the process alive and camera hardware accessible while the screen is off.
  * A PARTIAL_WAKE_LOCK prevents the CPU from sleeping mid-stream.
  */
 class StreamingService : Service() {
 
     companion object {
+        private const val TAG        = "CamNet"
         private const val CHANNEL_ID = "camnet_streaming"
         private const val NOTIF_ID   = 1
     }
@@ -27,24 +29,30 @@ class StreamingService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val notification = buildNotification()
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                NOTIF_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-            )
-        } else {
-            startForeground(NOTIF_ID, notification)
+        try {
+            val notification = buildNotification()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    NOTIF_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                )
+            } else {
+                startForeground(NOTIF_ID, notification)
+            }
+        } catch (e: Exception) {
+            // Android 14+ throws SecurityException if POST_NOTIFICATIONS not granted.
+            // Fall back: still acquire wake lock so CPU stays awake even without notification.
+            Log.w(TAG, "startForeground failed (notification permission missing?): $e")
         }
 
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        wakeLock?.release()
         wakeLock = pm.newWakeLock(
             PowerManager.PARTIAL_WAKE_LOCK,
             "CamNet::StreamingWakeLock"
-        ).also { it.acquire(8 * 60 * 60 * 1000L) } // 8-hour safety cap
+        ).also { it.acquire(8 * 60 * 60 * 1000L) }
 
         return START_STICKY
     }

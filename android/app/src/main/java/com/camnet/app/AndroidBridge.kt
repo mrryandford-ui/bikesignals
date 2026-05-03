@@ -12,16 +12,24 @@ class AndroidBridge(
     /** Called by camera.js when streaming starts — starts the foreground service. */
     @JavascriptInterface
     fun startStreaming() {
-        ContextCompat.startForegroundService(
-            context,
-            Intent(context, StreamingService::class.java)
-        )
+        try {
+            ContextCompat.startForegroundService(
+                context,
+                Intent(context, StreamingService::class.java)
+            )
+        } catch (e: Exception) {
+            android.util.Log.w("CamNet", "startForegroundService failed: $e")
+        }
     }
 
     /** Called by camera.js when streaming ends — stops the foreground service. */
     @JavascriptInterface
     fun stopStreaming() {
-        context.stopService(Intent(context, StreamingService::class.java))
+        try {
+            context.stopService(Intent(context, StreamingService::class.java))
+        } catch (e: Exception) {
+            android.util.Log.w("CamNet", "stopService failed: $e")
+        }
     }
 
     /** Called from the setup screen on first launch to save the server URL. */
