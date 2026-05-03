@@ -176,26 +176,10 @@ function updateConnState(cameraId, state) {
   if (overlay) overlay.classList.toggle('hidden', state === 'connected');
 }
 
-function onCameraStatus({ cameraId, facingMode, muted, torch, screenOff }) {
+function onCameraStatus({ cameraId, facingMode, muted, torch }) {
   const peer = peers.get(cameraId);
   if (!peer) return;
 
-  if (screenOff !== undefined) {
-    const card = document.getElementById(`card-${cameraId}`);
-    if (!card) return;
-    let overlay = card.querySelector('.screen-off-overlay');
-    if (screenOff) {
-      if (!overlay) {
-        overlay = document.createElement('div');
-        overlay.className = 'screen-off-overlay';
-        overlay.innerHTML = '<div>📵</div><div>Screen off</div>';
-        card.appendChild(overlay);
-      }
-    } else {
-      overlay?.remove();
-    }
-    return;
-  }
   if (facingMode !== undefined) {
     peer.facingMode = facingMode;
     applyMirror(cameraId);

@@ -429,95 +429,76 @@ function stopKeepAlive() {
   }
 }
 
-// ── Canvas placeholder + screen-off handling ───────────────────
-// Android kills camera hardware access for background processes.
-// Solution: swap to a canvas stream BEFORE the OS kills the track,
-// keeping the WebRTC connection alive. Swap back when screen returns.
-let _placeholderStream    = null;
-let _placeholderInterval  = null;
-
-async function onScreenOff() {
-  if (!pc || !localStream) return;
-
-  // Build a canvas stream to replace the camera track
-  const canvas = Object.assign(document.createElement('canvas'), { width: 320, height: 240 });
-  const ctx    = canvas.getContext('2d');
-  const start  = Date.now();
-
-  function draw() {
-    const elapsed = Math.floor((Date.now() - start) / 1000);
-    const m = String(Math.floor(elapsed / 60)).padStart(2, '0');
-    const s = String(elapsed % 60).padStart(2, '0');
-    ctx.fillStyle = '#0a0a0f';
-    ctx.fillRect(0, 0, 320, 240);
-    ctx.fillStyle = '#334155';
-    ctx.font = 'bold 48px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('📵', 160, 100);
-    ctx.fillStyle = '#64748b';
-    ctx.font = 'bold 16px sans-serif';
-    ctx.fillText('Screen off', 160, 140);
-    ctx.fillStyle = '#475569';
-    ctx.font = '13px sans-serif';
-    ctx.fillText(m + ':' + s, 160, 165);
+// ── Wake Lock ──────────────────────────────────────────────────
+async function requestWakeLock() {
+  if (!('wakeLock' in navigator)) return;
+  try {
+    wakeLock = await navigator.wakeLock.request('screen');
+    wakeLock.addEventListener('release', () => { wakeLock = null; });
+  } catch (e) {
+    console.warn('Wake lock failed:', e);
   }
-
-  draw();
-  _placeholderInterval = setInterval(draw, 1000);
-  _placeholderStream   = canvas.captureStream(1);
-
-  // Replace camera track with canvas — WebRTC connection stays alive
-  const sender = pc.getSenders().find(s => s.track?.kind === 'video');
-  if (sender) await sender.replaceTrack(_placeholderStream.getVideoTracks()[0]).catch(() => {});
-
-  // Stop real camera tracks to release hardware (OS will revoke anyway)
-  localStream.getVideoTracks().forEach(t => t.stop());
-
-  // Mute audio so viewer doesn't hear ambient sound while camera is hidden
-  localStream.getAudioTracks().forEach(t => { t.enabled = false; });
-
-  wsSend({ type: 'camera-status', screenOff: true });
 }
 
-async function onScreenOn() {
-  // Clear placeholder
-  clearInterval(_placeholderInterval);
-  _placeholderInterval = null;
-  if (_placeholderStream) {
-    _placeholderStream.getTracks().forEach(t => t.stop());
-    _placeholderStream = null;
-  }
+// ── Stealth mode ───────────────────────────────────────────────
+// Wake Lock keeps the screen physically on; black overlay makes it look off.
+// The tab stays foreground, the camera keeps streaming continuously.
+let stealthTapCount = 0;
+let stealthTapTimer = null;
 
-  // Resume keep-alive audio
+document.getElementById('stealthBtn').addEventListener('click', enterStealth);
+
+async function enterStealth() {
+  document.getElementById('stealthOverlay').style.display = 'block';
+  if (!wakeLock) await requestWakeLock();
+}
+
+function exitStealth() {
+  stealthTapCount = 0;
+  clearTimeout(stealthTapTimer);
+  document.getElementById('stealthOverlay').style.display = 'none';
+}
+
+document.getElementById('stealthOverlay').addEventListener('click', () => {
+  stealthTapCount++;
+  clearTimeout(stealthTapTimer);
+
+  const hint = document.getElementById('stealthTapHint');
+  hint.style.color = '#444';
+  setTimeout(() => { hint.style.color = '#111'; }, 300);
+
+  if (stealthTapCount >= 3) {
+    exitStealth();
+  } else {
+    stealthTapTimer = setTimeout(() => { stealthTapCount = 0; }, 2000);
+  }
+});
+
+// ── Visibility change — wake lock + stream recovery ────────────
+// If the physical power button is pressed while NOT in stealth, the OS may
+// kill camera access. On return, reacquire the wake lock and restart the
+// camera track if the OS ended it.
+document.addEventListener('visibilitychange', async () => {
+  if (!localStream || document.visibilityState !== 'visible') return;
+  if (!wakeLock) await requestWakeLock();
   if (_audioCtx?.state === 'suspended') _audioCtx.resume().catch(() => {});
   if (_keepAliveAudio?.paused)          _keepAliveAudio.play().catch(() => {});
-
-  // Restart camera and restore audio
-  try {
-    await initMedia(); // restarts getUserMedia with same settings
-    if (pc) {
-      const vTrack = localStream.getVideoTracks()[0];
-      const aTrack = localStream.getAudioTracks()[0];
-      for (const sender of pc.getSenders()) {
-        if (sender.track?.kind === 'video' && vTrack) await sender.replaceTrack(vTrack).catch(() => {});
-        if (sender.track?.kind === 'audio' && aTrack) await sender.replaceTrack(aTrack).catch(() => {});
+  const vTrack = localStream.getVideoTracks()[0];
+  if (vTrack && vTrack.readyState === 'ended') {
+    try {
+      await initMedia();
+      if (pc) {
+        const newV = localStream.getVideoTracks()[0];
+        const newA = localStream.getAudioTracks()[0];
+        for (const sender of pc.getSenders()) {
+          if (sender.track?.kind === 'video' && newV) await sender.replaceTrack(newV).catch(() => {});
+          if (sender.track?.kind === 'audio' && newA) await sender.replaceTrack(newA).catch(() => {});
+        }
+        localStream.getAudioTracks().forEach(t => { t.enabled = micEnabled; });
       }
+    } catch (e) {
+      console.warn('Camera recovery failed:', e);
     }
-    // Restore mic state
-    localStream.getAudioTracks().forEach(t => { t.enabled = micEnabled; });
-  } catch (e) {
-    console.warn('Camera restart failed:', e);
-  }
-
-  wsSend({ type: 'camera-status', screenOff: false });
-}
-
-document.addEventListener('visibilitychange', async () => {
-  if (!localStream) return;
-  if (document.visibilityState === 'hidden') {
-    await onScreenOff();
-  } else {
-    await onScreenOn();
   }
 });
 
