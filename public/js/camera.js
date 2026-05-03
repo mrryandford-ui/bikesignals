@@ -313,6 +313,7 @@ function hangup() {
   closePeer();
   if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
   if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
+  stopKeepAlive();
   ws?.close();
   showSetupScreen();
 }
@@ -340,6 +341,7 @@ function showLiveScreen() {
   document.getElementById('liveScreen').classList.remove('hidden');
   document.getElementById('liveRoomCode').textContent = roomId;
   setJoinLoading(false);
+  startKeepAlive();
 }
 
 function showSetupScreen() {
@@ -363,19 +365,56 @@ function hideError() {
   document.getElementById('errorMsg').classList.remove('show');
 }
 
-// ── Wake lock (prevent screen sleep) ──────────────────────────
-async function requestWakeLock() {
-  if (!('wakeLock' in navigator)) return;
+// ── Keep-alive: silent audio prevents Android suspending the tab ──
+let _audioCtx = null;
+
+function startKeepAlive() {
+  if (_audioCtx) return;
   try {
-    wakeLock = await navigator.wakeLock.request('screen');
-    wakeLock.addEventListener('release', () => { wakeLock = null; });
-  } catch {}
+    _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc  = _audioCtx.createOscillator();
+    const gain = _audioCtx.createGain();
+    gain.gain.value = 0.001; // inaudible but non-zero so Android sees active audio
+    osc.connect(gain);
+    gain.connect(_audioCtx.destination);
+    osc.start();
+  } catch (e) {
+    console.warn('Keep-alive audio failed:', e);
+  }
 }
 
-// Re-acquire wake lock when tab becomes visible
+function stopKeepAlive() {
+  if (!_audioCtx) return;
+  _audioCtx.close().catch(() => {});
+  _audioCtx = null;
+}
+
+// ── Stream recovery when screen wakes back up ──────────────────
 document.addEventListener('visibilitychange', async () => {
-  if (document.visibilityState === 'visible' && localStream && !wakeLock) {
-    await requestWakeLock();
+  if (document.visibilityState !== 'visible' || !localStream) return;
+
+  // Resume audio context if browser suspended it
+  if (_audioCtx && _audioCtx.state === 'suspended') {
+    _audioCtx.resume().catch(() => {});
+  }
+
+  // Check if any tracks died while screen was off and restart them
+  const videoAlive = localStream.getVideoTracks().some(t => t.readyState === 'live');
+  const audioAlive = localStream.getAudioTracks().some(t => t.readyState === 'live');
+  if (!videoAlive || !audioAlive) {
+    try {
+      await initMedia();
+      if (pc) {
+        const vTrack = localStream.getVideoTracks()[0];
+        const aTrack = localStream.getAudioTracks()[0];
+        for (const sender of pc.getSenders()) {
+          if (sender.track?.kind === 'video' && vTrack) await sender.replaceTrack(vTrack).catch(() => {});
+          if (sender.track?.kind === 'audio' && aTrack) await sender.replaceTrack(aTrack).catch(() => {});
+        }
+      }
+    } catch (e) {
+      console.warn('Stream recovery failed:', e);
+    }
   }
 });
 
