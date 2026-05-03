@@ -312,11 +312,14 @@ document.getElementById('flipBtn').addEventListener('click', flipCamera);
 document.getElementById('hangupBtn').addEventListener('click', hangup);
 
 function hangup() {
+  exitStealth();
   closePeer();
   if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
   if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
   stopKeepAlive();
   ws?.close();
+  // Native app: stop foreground service
+  window.AndroidBridge?.stopStreaming();
   showSetupScreen();
 }
 
@@ -344,12 +347,27 @@ function showLiveScreen() {
   document.getElementById('liveRoomCode').textContent = roomId;
   setJoinLoading(false);
   startKeepAlive();
+  // Native app: start foreground service so camera stays alive with screen off
+  window.AndroidBridge?.startStreaming();
 }
 
 function showSetupScreen() {
   document.getElementById('liveScreen').classList.add('hidden');
   document.getElementById('setupScreen').classList.remove('hidden');
   setConnStatus('disconnected', 'Disconnected');
+}
+
+// ── Native: long-press session code → reset server URL ─────────
+if (window.AndroidBridge) {
+  let _lpTimer = null;
+  const codeEl = document.getElementById('liveRoomCode');
+  codeEl.addEventListener('touchstart', () => {
+    _lpTimer = setTimeout(() => {
+      window.AndroidBridge.resetServer();
+    }, 1500);
+  });
+  codeEl.addEventListener('touchend',   () => clearTimeout(_lpTimer));
+  codeEl.addEventListener('touchmove',  () => clearTimeout(_lpTimer));
 }
 
 function setJoinLoading(loading) {
