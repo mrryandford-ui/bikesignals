@@ -429,31 +429,95 @@ function stopKeepAlive() {
   }
 }
 
-// ── Stream recovery when screen wakes back up ──────────────────
-document.addEventListener('visibilitychange', async () => {
-  if (document.visibilityState !== 'visible' || !localStream) return;
+// ── Canvas placeholder + screen-off handling ───────────────────
+// Android kills camera hardware access for background processes.
+// Solution: swap to a canvas stream BEFORE the OS kills the track,
+// keeping the WebRTC connection alive. Swap back when screen returns.
+let _placeholderStream    = null;
+let _placeholderInterval  = null;
 
-  // Resume audio context if browser suspended it
+async function onScreenOff() {
+  if (!pc || !localStream) return;
+
+  // Build a canvas stream to replace the camera track
+  const canvas = Object.assign(document.createElement('canvas'), { width: 320, height: 240 });
+  const ctx    = canvas.getContext('2d');
+  const start  = Date.now();
+
+  function draw() {
+    const elapsed = Math.floor((Date.now() - start) / 1000);
+    const m = String(Math.floor(elapsed / 60)).padStart(2, '0');
+    const s = String(elapsed % 60).padStart(2, '0');
+    ctx.fillStyle = '#0a0a0f';
+    ctx.fillRect(0, 0, 320, 240);
+    ctx.fillStyle = '#334155';
+    ctx.font = 'bold 48px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('📵', 160, 100);
+    ctx.fillStyle = '#64748b';
+    ctx.font = 'bold 16px sans-serif';
+    ctx.fillText('Screen off', 160, 140);
+    ctx.fillStyle = '#475569';
+    ctx.font = '13px sans-serif';
+    ctx.fillText(m + ':' + s, 160, 165);
+  }
+
+  draw();
+  _placeholderInterval = setInterval(draw, 1000);
+  _placeholderStream   = canvas.captureStream(1);
+
+  // Replace camera track with canvas — WebRTC connection stays alive
+  const sender = pc.getSenders().find(s => s.track?.kind === 'video');
+  if (sender) await sender.replaceTrack(_placeholderStream.getVideoTracks()[0]).catch(() => {});
+
+  // Stop real camera tracks to release hardware (OS will revoke anyway)
+  localStream.getVideoTracks().forEach(t => t.stop());
+
+  // Mute audio so viewer doesn't hear ambient sound while camera is hidden
+  localStream.getAudioTracks().forEach(t => { t.enabled = false; });
+
+  wsSend({ type: 'camera-status', screenOff: true });
+}
+
+async function onScreenOn() {
+  // Clear placeholder
+  clearInterval(_placeholderInterval);
+  _placeholderInterval = null;
+  if (_placeholderStream) {
+    _placeholderStream.getTracks().forEach(t => t.stop());
+    _placeholderStream = null;
+  }
+
+  // Resume keep-alive audio
   if (_audioCtx?.state === 'suspended') _audioCtx.resume().catch(() => {});
   if (_keepAliveAudio?.paused)          _keepAliveAudio.play().catch(() => {});
 
-  // Restart any tracks that died while screen was off
-  const videoAlive = localStream.getVideoTracks().some(t => t.readyState === 'live');
-  const audioAlive = localStream.getAudioTracks().some(t => t.readyState === 'live');
-  if (!videoAlive || !audioAlive) {
-    try {
-      await initMedia();
-      if (pc) {
-        const vTrack = localStream.getVideoTracks()[0];
-        const aTrack = localStream.getAudioTracks()[0];
-        for (const sender of pc.getSenders()) {
-          if (sender.track?.kind === 'video' && vTrack) await sender.replaceTrack(vTrack).catch(() => {});
-          if (sender.track?.kind === 'audio' && aTrack) await sender.replaceTrack(aTrack).catch(() => {});
-        }
+  // Restart camera and restore audio
+  try {
+    await initMedia(); // restarts getUserMedia with same settings
+    if (pc) {
+      const vTrack = localStream.getVideoTracks()[0];
+      const aTrack = localStream.getAudioTracks()[0];
+      for (const sender of pc.getSenders()) {
+        if (sender.track?.kind === 'video' && vTrack) await sender.replaceTrack(vTrack).catch(() => {});
+        if (sender.track?.kind === 'audio' && aTrack) await sender.replaceTrack(aTrack).catch(() => {});
       }
-    } catch (e) {
-      console.warn('Stream recovery failed:', e);
     }
+    // Restore mic state
+    localStream.getAudioTracks().forEach(t => { t.enabled = micEnabled; });
+  } catch (e) {
+    console.warn('Camera restart failed:', e);
+  }
+
+  wsSend({ type: 'camera-status', screenOff: false });
+}
+
+document.addEventListener('visibilitychange', async () => {
+  if (!localStream) return;
+  if (document.visibilityState === 'hidden') {
+    await onScreenOff();
+  } else {
+    await onScreenOn();
   }
 });
 
