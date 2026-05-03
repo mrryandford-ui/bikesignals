@@ -152,11 +152,31 @@ input[type="text"]::placeholder { color: var(--text-muted); }
   border-radius: 2px;
   margin: 0 auto 20px;
 }
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
 .panel-title {
   font-size: 17px;
   font-weight: 700;
-  margin-bottom: 20px;
+  margin-bottom: 0;
 }
+.panel-close {
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  border: none;
+  background: var(--surface3);
+  color: var(--text-dim);
+  font-size: 14px;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+.panel-close:hover  { background: var(--surface3); color: var(--text); }
+.panel-close:active { transform: scale(0.9); }
 .panel-row {
   display: flex;
   align-items: center;

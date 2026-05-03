@@ -70,8 +70,7 @@
 <div class="panel hidden" id="sessionPanel">
   <div class="panel-backdrop" data-close="sessionPanel"></div>
   <div class="panel-sheet">
-    <div class="panel-handle"></div>
-    <div class="panel-title">Session</div>
+    <div class="panel-header"><span class="panel-title">Session</span><button class="panel-close" data-close="sessionPanel">✕</button></div>
     <div class="panel-row">
       <span class="panel-label">Room code</span>
       <span id="panelRoomCode" style="font-size:22px;font-weight:900;letter-spacing:4px;color:var(--accent)">------</span>
@@ -92,8 +91,7 @@
 <div class="panel hidden" id="layoutPanel">
   <div class="panel-backdrop" data-close="layoutPanel"></div>
   <div class="panel-sheet">
-    <div class="panel-handle"></div>
-    <div class="panel-title">Layout</div>
+    <div class="panel-header"><span class="panel-title">Layout</span><button class="panel-close" data-close="layoutPanel">✕</button></div>
     <div class="panel-row">
       <span class="panel-label">Grid size</span>
       <div class="seg-ctrl" id="layoutSeg">
@@ -110,8 +108,7 @@
 <div class="panel hidden" id="settingsPanel">
   <div class="panel-backdrop" data-close="settingsPanel"></div>
   <div class="panel-sheet">
-    <div class="panel-handle"></div>
-    <div class="panel-title">Settings</div>
+    <div class="panel-header"><span class="panel-title">Settings</span><button class="panel-close" data-close="settingsPanel">✕</button></div>
     <div class="panel-row">
       <span class="panel-label">Motion detection</span>
       <button class="toggle" id="globalMotionToggle" aria-label="Motion detection"></button>
@@ -139,8 +136,7 @@
 <div class="panel hidden" id="renamePanel">
   <div class="panel-backdrop" data-close="renamePanel"></div>
   <div class="panel-sheet">
-    <div class="panel-handle"></div>
-    <div class="panel-title">Rename Camera</div>
+    <div class="panel-header"><span class="panel-title">Rename Camera</span><button class="panel-close" data-close="renamePanel">✕</button></div>
     <input type="text" id="renameInput" placeholder="Camera name" maxlength="30" style="margin-bottom:14px;">
     <button class="btn btn-primary" id="renameConfirmBtn" style="width:100%;">Save</button>
   </div>

@@ -492,8 +492,8 @@ document.getElementById('renameConfirmBtn').addEventListener('click', () => {
 function openPanel(id)  { document.getElementById(id).classList.remove('hidden'); }
 function closePanel(id) { document.getElementById(id).classList.add('hidden'); }
 
-document.querySelectorAll('.panel-backdrop').forEach(bd => {
-  bd.addEventListener('click', () => closePanel(bd.dataset.close));
+document.querySelectorAll('.panel-backdrop, .panel-close').forEach(el => {
+  el.addEventListener('click', () => closePanel(el.dataset.close));
 });
 
 // ── Header controls ────────────────────────────────────────────
