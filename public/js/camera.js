@@ -64,26 +64,31 @@ async function startJoin() {
 // ── Media ──────────────────────────────────────────────────────
 async function initMedia() {
   const q = QUALITY[quality];
-  const constraints = {
-    video: {
-      facingMode: { ideal: facingMode },
-      width:      { ideal: q.width },
-      height:     { ideal: q.height },
-      frameRate:  { ideal: q.frameRate },
-    },
-    audio: {
-      echoCancellation: true,
-      noiseSuppression: true,
-      sampleRate: 44100,
-    },
+  const video = {
+    facingMode: { ideal: facingMode },
+    width:      { ideal: q.width },
+    height:     { ideal: q.height },
+    frameRate:  { ideal: q.frameRate },
   };
+  const audio = { echoCancellation: true, noiseSuppression: true, sampleRate: 44100 };
 
   if (localStream) localStream.getTracks().forEach(t => t.stop());
-  localStream = await navigator.mediaDevices.getUserMedia(constraints);
 
-  const video = document.getElementById('localVideo');
-  video.srcObject = localStream;
-  video.classList.toggle('mirror', facingMode === 'user');
+  try {
+    localStream = await navigator.mediaDevices.getUserMedia({ video, audio });
+  } catch (err) {
+    // Audio device busy, missing, or denied — fall back to video-only
+    const audioFail = ['NotReadableError', 'NotFoundError', 'OverconstrainedError'].includes(err.name)
+      || (err.name === 'NotAllowedError' && !err.message?.toLowerCase().includes('camera'));
+    if (!audioFail) throw err;
+    localStream = await navigator.mediaDevices.getUserMedia({ video, audio: false });
+    micEnabled = false;
+    showToast('Mic unavailable — video only');
+  }
+
+  const vid = document.getElementById('localVideo');
+  vid.srcObject = localStream;
+  vid.classList.toggle('mirror', facingMode === 'user');
 
   sendStatus();
 }
