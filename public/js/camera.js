@@ -70,18 +70,22 @@ async function initMedia() {
     height:     { ideal: q.height },
     frameRate:  { ideal: q.frameRate },
   };
-  const audio = { echoCancellation: true, noiseSuppression: true, sampleRate: 44100 };
+  const audio = { echoCancellation: true, noiseSuppression: true };
 
   if (localStream) localStream.getTracks().forEach(t => t.stop());
 
   try {
     localStream = await navigator.mediaDevices.getUserMedia({ video, audio });
   } catch {
-    // Any failure with audio — retry video-only. If camera itself is denied this
-    // second call will throw and the error propagates up to the join handler.
-    localStream = await navigator.mediaDevices.getUserMedia({ video, audio: false });
-    micEnabled = false;
-    showToast('Mic unavailable — video only');
+    try {
+      // Specific constraints rejected — try basic audio (device chooses format)
+      localStream = await navigator.mediaDevices.getUserMedia({ video, audio: true });
+    } catch {
+      // No mic at all — stream video only
+      localStream = await navigator.mediaDevices.getUserMedia({ video, audio: false });
+      micEnabled = false;
+      showToast('Mic unavailable — video only');
+    }
   }
 
   const vid = document.getElementById('localVideo');
