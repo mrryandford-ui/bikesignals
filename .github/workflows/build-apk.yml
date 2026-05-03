@@ -23,8 +23,7 @@ jobs:
         uses: android-actions/setup-android@v3
 
       - name: Install SDK platform & build tools
-        run: |
-          sdkmanager "platforms;android-34" "build-tools;34.0.0"
+        run: sdkmanager "platforms;android-34" "build-tools;34.0.0"
 
       - name: Install Gradle 8.2.1
         run: |
@@ -33,6 +32,24 @@ jobs:
             -o /tmp/gradle/gradle.zip
           unzip -q -d /tmp/gradle /tmp/gradle/gradle.zip
           echo "/tmp/gradle/gradle-8.2.1/bin" >> $GITHUB_PATH
+
+      - name: Restore cached signing keystore
+        id: keystore-cache
+        uses: actions/cache@v4
+        with:
+          path: android/app/camnet-debug.jks
+          key: camnet-debug-keystore-v1
+
+      - name: Generate keystore (first run only)
+        if: steps.keystore-cache.outputs.cache-hit != 'true'
+        run: |
+          keytool -genkey -v \
+            -keystore android/app/camnet-debug.jks \
+            -keyalg RSA -keysize 2048 -validity 36500 \
+            -alias camnet \
+            -dname "CN=CamNet,O=CamNet,C=US" \
+            -storepass camnet-debug \
+            -keypass camnet-debug
 
       - name: Create local.properties
         run: echo "sdk.dir=$ANDROID_SDK_ROOT" > android/local.properties
