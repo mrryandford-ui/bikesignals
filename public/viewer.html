@@ -9,6 +9,18 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
   <link rel="stylesheet" href="/css/app.css">
+  <script>
+    // If opened on localhost, bounce to the real LAN IP immediately.
+    // Runs before anything else so the address bar, QR, and WS all use the real IP.
+    if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+      fetch('/api/info')
+        .then(r => r.json())
+        .then(d => {
+          if (d.lanIP) location.replace(location.href.replace(location.hostname, d.lanIP));
+        })
+        .catch(() => {});
+    }
+  </script>
 </head>
 <body>
 <div class="viewer-app" id="app">
