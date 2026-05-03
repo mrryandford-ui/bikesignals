@@ -50,6 +50,8 @@ async function startJoin() {
   hideError();
   setJoinLoading(true);
   roomId = code;
+  // Create AudioContext here — must be inside a user gesture
+  _initAudioCtx();
   try {
     await initMedia();
     connectWS();
@@ -365,28 +367,66 @@ function hideError() {
   document.getElementById('errorMsg').classList.remove('show');
 }
 
-// ── Keep-alive: silent audio prevents Android suspending the tab ──
-let _audioCtx = null;
+// ── Keep-alive: route silent audio through <audio> element so   ──
+// ── Android grants audio focus and won't suspend the tab        ──
+let _audioCtx      = null;
+let _keepAliveAudio = null;
 
-function startKeepAlive() {
+function _initAudioCtx() {
   if (_audioCtx) return;
   try {
     _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    _audioCtx.resume().catch(() => {});
+  } catch (e) {}
+}
+
+function startKeepAlive() {
+  if (_keepAliveAudio) return;
+  try {
+    _initAudioCtx();
+    if (!_audioCtx) return;
+
     const osc  = _audioCtx.createOscillator();
     const gain = _audioCtx.createGain();
-    gain.gain.value = 0.001; // inaudible but non-zero so Android sees active audio
+    gain.gain.value = 0.001;
+
+    // Route to a MediaStream → <audio> element so Android gives us audio focus
+    const dest = _audioCtx.createMediaStreamDestination();
     osc.connect(gain);
-    gain.connect(_audioCtx.destination);
+    gain.connect(dest);
     osc.start();
+
+    _keepAliveAudio = new Audio();
+    _keepAliveAudio.srcObject = dest.stream;
+    _keepAliveAudio.volume    = 0.001;
+    _keepAliveAudio.play().catch(() => {});
+
+    // Tell Android OS this is intentional media — prevents tab suspension
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: 'CamNet Camera',
+        artist: 'Streaming…',
+      });
+      navigator.mediaSession.playbackState = 'playing';
+    }
   } catch (e) {
-    console.warn('Keep-alive audio failed:', e);
+    console.warn('Keep-alive failed:', e);
   }
 }
 
 function stopKeepAlive() {
-  if (!_audioCtx) return;
-  _audioCtx.close().catch(() => {});
-  _audioCtx = null;
+  if (_keepAliveAudio) {
+    _keepAliveAudio.pause();
+    _keepAliveAudio.srcObject = null;
+    _keepAliveAudio = null;
+  }
+  if (_audioCtx) {
+    _audioCtx.close().catch(() => {});
+    _audioCtx = null;
+  }
+  if ('mediaSession' in navigator) {
+    navigator.mediaSession.playbackState = 'none';
+  }
 }
 
 // ── Stream recovery when screen wakes back up ──────────────────
@@ -394,11 +434,10 @@ document.addEventListener('visibilitychange', async () => {
   if (document.visibilityState !== 'visible' || !localStream) return;
 
   // Resume audio context if browser suspended it
-  if (_audioCtx && _audioCtx.state === 'suspended') {
-    _audioCtx.resume().catch(() => {});
-  }
+  if (_audioCtx?.state === 'suspended') _audioCtx.resume().catch(() => {});
+  if (_keepAliveAudio?.paused)          _keepAliveAudio.play().catch(() => {});
 
-  // Check if any tracks died while screen was off and restart them
+  // Restart any tracks that died while screen was off
   const videoAlive = localStream.getVideoTracks().some(t => t.readyState === 'live');
   const audioAlive = localStream.getAudioTracks().some(t => t.readyState === 'live');
   if (!videoAlive || !audioAlive) {
