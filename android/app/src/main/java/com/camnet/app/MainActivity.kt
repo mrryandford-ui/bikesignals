@@ -96,7 +96,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     fun showSetup() {
-        webView.loadDataWithBaseURL(null, setupHtml(), "text/html", "UTF-8", null)
+        // file:///android_asset/ base URL makes AndroidBridge accessible from JS
+        webView.loadDataWithBaseURL("file:///android_asset/", setupHtml(), "text/html", "UTF-8", null)
     }
 
     private fun setupHtml(): String = """
@@ -135,6 +136,7 @@ class MainActivity : AppCompatActivity() {
           function save(){
             var ip=document.getElementById('ip').value.trim().replace(/[\/\s]/g,'');
             if(!ip)return;
+            document.querySelector('button').textContent='Connecting…';
             AndroidBridge.setServerUrl('https://'+ip+':3000');
           }
           document.getElementById('ip').addEventListener('keydown',function(e){
