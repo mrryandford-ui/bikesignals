@@ -59,30 +59,35 @@ class AndroidBridge(
         } catch (e: Exception) {
             android.util.Log.w("CamNet", "startSignalingService failed: $e")
         }
-        // Load a splash that polls localhost until Ktor is ready, then redirects.
-        // Avoids ERR_EMPTY_RESPONSE when WebView connects before the port is bound.
+        // Load a splash page rooted at http://localhost:<port>/ so that the
+        // fetch('/api/info') call is same-origin (no CORS) and location.replace
+        // navigates within the same origin.  Using loadData() would give the page
+        // a null origin and block the fetch.
         val port = SignalingService.PORT
+        val base = "http://localhost:$port/"
         val splash = """
             <!DOCTYPE html><html><head>
             <meta name="viewport" content="width=device-width,initial-scale=1">
             <style>*{margin:0;padding:0}body{background:#090910;color:#94a3b8;
-              font-family:-apple-system,sans-serif;display:flex;align-items:center;
-              justify-content:center;min-height:100vh;font-size:16px;gap:12px}</style>
+              font-family:-apple-system,sans-serif;display:flex;flex-direction:column;
+              align-items:center;justify-content:center;min-height:100vh;gap:16px}</style>
             </head><body>
-            <div class="spinner" style="width:24px;height:24px;border:3px solid #1e293b;
+            <div style="width:32px;height:32px;border:3px solid #1e293b;
               border-top-color:#3b82f6;border-radius:50%;animation:s 0.8s linear infinite"></div>
             <style>@keyframes s{to{transform:rotate(360deg)}}</style>
-            <span>Starting server…</span>
+            <span style="font-size:15px">Starting server…</span>
             <script>
-              (function poll(){
-                fetch('http://localhost:$port/api/info',{cache:'no-store'})
-                  .then(()=>location.replace('http://localhost:$port/viewer.html'))
-                  .catch(()=>setTimeout(poll,400));
-              })();
+              (function poll(n){
+                if(n>30){AndroidBridge.resetServer();return;}
+                fetch('/api/info',{cache:'no-store'})
+                  .then(()=>location.replace('/viewer.html'))
+                  .catch(()=>setTimeout(()=>poll(n+1),400));
+              })(0);
             </script></body></html>
         """.trimIndent()
         (context as? MainActivity)?.runOnUiThread {
-            (context as? MainActivity)?.webView?.loadData(splash, "text/html", "UTF-8")
+            (context as? MainActivity)?.webView
+                ?.loadDataWithBaseURL(base, splash, "text/html", "UTF-8", null)
         }
     }
 
