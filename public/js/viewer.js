@@ -146,8 +146,8 @@ function toggleEmptyState() {
 
 // ── WebRTC signaling ───────────────────────────────────────────
 async function handleOffer({ cameraId, sdp }) {
+  if (!peers.has(cameraId)) onCameraJoined(cameraId, `Camera ${peers.size + 1}`);
   const peer = peers.get(cameraId);
-  if (!peer) return;
   await peer.pc.setRemoteDescription({ type: 'offer', sdp });
   const answer = await peer.pc.createAnswer();
   await peer.pc.setLocalDescription(answer);

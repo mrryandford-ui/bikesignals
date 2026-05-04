@@ -59,10 +59,39 @@ function handle(ws, msg) {
         if (old && old.viewer === ws) rooms.delete(ws.roomId);
       }
       const id = roomCode();
-      rooms.set(id, { viewer: ws, cameras: new Map() });
+      rooms.set(id, { viewer: ws, cameras: new Map(), _cleanupTimer: null });
       ws.roomId = id;
       ws.role   = 'viewer';
-      send(ws, { type: 'room-created', roomId: id });
+      send(ws, { type: 'room-created', roomId: id, lanIP: getLocalIPs()[0] || null });
+      break;
+    }
+
+    // Viewer reconnecting after a tab-switch / brief disconnect — reattach to existing room
+    case 'rejoin-room': {
+      const roomId = (msg.roomId || '').toUpperCase().trim();
+      const room   = rooms.get(roomId);
+      if (!room) {
+        // Room already expired — treat as a fresh create
+        const id = roomCode();
+        rooms.set(id, { viewer: ws, cameras: new Map(), _cleanupTimer: null });
+        ws.roomId = id;
+        ws.role   = 'viewer';
+        send(ws, { type: 'room-created', roomId: id, lanIP: getLocalIPs()[0] || null });
+        return;
+      }
+      clearTimeout(room._cleanupTimer);
+      room._cleanupTimer = null;
+      room.viewer = ws;
+      ws.roomId   = roomId;
+      ws.role     = 'viewer';
+      // Re-announce every existing camera so viewer can create its peer entries
+      // BEFORE telling cameras to resend offers — order matters
+      room.cameras.forEach((cam, id) => {
+        send(ws, { type: 'camera-joined', cameraId: id, cameraName: cam.cameraName });
+      });
+      send(ws, { type: 'room-rejoined', roomId });
+      // Now cameras resend their WebRTC offers
+      room.cameras.forEach(cam => send(cam, { type: 'viewer-reconnected' }));
       break;
     }
 
@@ -73,12 +102,21 @@ function handle(ws, msg) {
         send(ws, { type: 'error', code: 'NO_ROOM', message: 'Room not found. Check the code and try again.' });
         return;
       }
+      const name = (msg.cameraName || '').trim() || `Camera ${room.cameras.size + 1}`;
+      // Remove any stale entry with the same name (camera reconnected with same name)
+      for (const [oldId, oldWs] of room.cameras) {
+        if (oldWs.cameraName === name) {
+          room.cameras.delete(oldId);
+          send(room.viewer, { type: 'camera-left', cameraId: oldId });
+          break;
+        }
+      }
       ws.roomId     = roomId;
       ws.role       = 'camera';
-      ws.cameraName = (msg.cameraName || '').trim() || `Camera ${room.cameras.size + 1}`;
+      ws.cameraName = name;
       room.cameras.set(ws.id, ws);
-      send(ws,          { type: 'joined',        cameraId: ws.id, cameraName: ws.cameraName });
-      send(room.viewer, { type: 'camera-joined', cameraId: ws.id, cameraName: ws.cameraName });
+      send(ws,          { type: 'joined',        cameraId: ws.id, cameraName: name });
+      send(room.viewer, { type: 'camera-joined', cameraId: ws.id, cameraName: name });
       break;
     }
 
@@ -120,8 +158,13 @@ function cleanup(ws) {
   const room = rooms.get(ws.roomId);
   if (!room) return;
   if (ws.role === 'viewer') {
-    room.cameras.forEach(cam => send(cam, { type: 'viewer-disconnected' }));
-    rooms.delete(ws.roomId);
+    // Grace period: give the viewer 25 s to reconnect before telling cameras and deleting
+    room._cleanupTimer = setTimeout(() => {
+      if (rooms.get(ws.roomId) === room) {
+        room.cameras.forEach(cam => send(cam, { type: 'viewer-disconnected' }));
+        rooms.delete(ws.roomId);
+      }
+    }, 25_000);
   } else if (ws.role === 'camera') {
     room.cameras.delete(ws.id);
     send(room.viewer, { type: 'camera-left', cameraId: ws.id });
@@ -150,7 +193,24 @@ function getLocalIPs() {
 async function main() {
   const tls  = await getCert();
   const app  = express();
-  app.use(express.static(path.join(__dirname, 'public')));
+
+  // Never cache this — viewer.js fetches it to get the real LAN IP
+  app.get('/api/info', (req, res) => {
+    const allIPs = Object.entries(os.networkInterfaces())
+      .flatMap(([name, addrs]) => (addrs || []).map(a => ({ name, address: a.address, internal: a.internal, family: a.family })))
+      .filter(i => !i.internal && i.family === 'IPv4');
+    const lanIP = getLocalIPs()[0] || null;
+    res.json({ lanIP, allIPs });
+  });
+
+  // Never cache JS/HTML — WebViews and browsers always get fresh files
+  app.use(express.static(path.join(__dirname, 'public'), {
+    setHeaders(res, filePath) {
+      if (/\.(js|html)$/.test(filePath)) {
+        res.setHeader('Cache-Control', 'no-store');
+      }
+    },
+  }));
 
   const server = https.createServer(tls, app);
   const wss    = new WebSocketServer({ server });
@@ -186,26 +246,20 @@ async function main() {
     console.log('│              CamNet is running              │');
     console.log('├─────────────────────────────────────────────┤');
     console.log('│                                             │');
-    console.log('│  SERVER PHONE (this one, in Termux)         │');
-    console.log('│  Open browser → https://localhost:' + PORT + '      │');
-    console.log('│  Choose: Monitor                            │');
-    console.log('│                                             │');
     if (shareURL) {
-      console.log('│  CAMERA PHONES (every other phone)          │');
-      console.log('│  Open browser →  ' + shareURL.padEnd(27) + '│');
-      console.log('│  Choose: Camera, enter the room code        │');
+      console.log('│  ALL PHONES use this URL:                   │');
+      console.log('│  ' + shareURL.padEnd(43) + '│');
       console.log('│                                             │');
+      console.log('│  Server phone  → choose Monitor             │');
+      console.log('│  Camera phones → choose Camera              │');
     } else {
       console.log('│  ⚠  No WiFi IP found — connect to WiFi      │');
-      console.log('│                                             │');
+      console.log('│  Then restart: npm start                    │');
     }
-    console.log('│  First visit only: Advanced → Proceed       │');
     console.log('│                                             │');
-    if (ips.length > 1) {
-      console.log('│  Extra IPs detected (ignore these):         │');
-      ips.slice(1).forEach(ip => console.log('│    ' + ip.padEnd(41) + '│'));
-      console.log('│                                             │');
-    }
+    console.log('│  First visit on each phone:                 │');
+    console.log('│  tap Advanced → Proceed  (once only)        │');
+    console.log('│                                             │');
     console.log('└─────────────────────────────────────────────┘\n');
   });
 
