@@ -138,7 +138,7 @@ class MainActivity : AppCompatActivity() {
           <span class="prefix">https://</span>
           <input id="ip" type="text" inputmode="decimal" placeholder="192.168.0.43"
                  autocomplete="off" autocorrect="off" spellcheck="false">
-          <span class="suffix">:3000</span>
+          <span class="suffix">:3443</span>
         </div>
         <button onclick="connect()">Connect &rarr;</button>
         <button class="back" onclick="AndroidBridge.showCameraSetup !== undefined && history.back()">← Back</button>
@@ -149,7 +149,7 @@ class MainActivity : AppCompatActivity() {
             var ip=document.getElementById('ip').value.trim().replace(/[\/\s]/g,'');
             if(!ip)return;
             document.querySelector('button').textContent='Connecting…';
-            AndroidBridge.setServerUrl('https://'+ip+':3000');
+            AndroidBridge.setServerUrl('https://'+ip+':3443');
           }
           document.getElementById('ip').addEventListener('keydown',function(e){
             if(e.key==='Enter')connect();

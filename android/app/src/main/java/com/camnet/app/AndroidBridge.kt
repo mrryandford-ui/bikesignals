@@ -67,10 +67,10 @@ class AndroidBridge(
                 android.util.Log.w("CamNet", "startSignalingService failed: $t")
             }
 
-            // Splash page rooted at https://localhost:<port>/ so fetch('/api/info')
+            // Splash page rooted at http://localhost:<port>/ so fetch('/api/info')
             // is same-origin (no CORS) and location.replace navigates within the
             // same origin. Using loadData() would give a null origin and block the fetch.
-            val base = "https://localhost:$port/"
+            val base = "http://localhost:$port/"
             val splash = """
                 <!DOCTYPE html><html><head>
                 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -114,7 +114,7 @@ class AndroidBridge(
     @JavascriptInterface
     fun startLocalCamera() {
         (context as? MainActivity)?.runOnUiThread {
-            onLoadUrl("https://localhost:${SignalingService.PORT}/camera.html")
+            onLoadUrl("http://localhost:${SignalingService.PORT}/camera.html")
         }
     }
 }

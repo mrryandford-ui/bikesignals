@@ -26,9 +26,9 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * HTTPS + WSS signaling server built on Ktor/CIO with a bundled self-signed cert.
- * HTTPS is required so camera phones can access navigator.mediaDevices (secure-context
- * requirement). The WebView bypasses the cert error via onReceivedSslError.proceed().
+ * Plain HTTP signaling server (Ktor/CIO) on [port].
+ * HTTPS for LAN camera phones is handled by [SslProxy] which terminates TLS
+ * and forwards raw TCP to this server — avoids Ktor's TLS stack entirely.
  */
 class CamNetServer(port: Int, private val assets: AssetManager) {
 
@@ -55,38 +55,32 @@ class CamNetServer(port: Int, private val assets: AssetManager) {
     private val rooms = ConcurrentHashMap<String, Room>()
     @Volatile private var started = false
 
-    private val engine: ApplicationEngine = run {
-        val ks = KeyStore.getInstance("PKCS12").also { keyStore ->
-            assets.open("camnet-ssl.p12").use { keyStore.load(it, "camnet-ssl".toCharArray()) }
-        }
-        val env = applicationEngineEnvironment {
-            sslConnector(
-                keyStore = ks,
-                keyAlias = "camnet",
-                keyStorePassword = { "camnet-ssl".toCharArray() },
-                privateKeyPassword = { "camnet-ssl".toCharArray() },
-            ) {
-                host = "0.0.0.0"
-                this.port = port
-            }
-            module {
-                install(WebSockets) {
-                    pingPeriod = Duration.ofSeconds(15)
-                    timeout    = Duration.ofSeconds(60)
-                }
-                routing {
-                    webSocket("/")    { handleSocket(this) }
-                    get("/api/info")  { serveApiInfo(call) }
-                    get("/")          { serveAsset(call) }
-                    get("/{path...}") { serveAsset(call) }
-                }
-            }
-        }
-        embeddedServer(CIO, env)
+    // Load the self-signed keystore once; shared with SslProxy
+    private val keyStore: KeyStore = KeyStore.getInstance("PKCS12").also { ks ->
+        assets.open("camnet-ssl.p12").use { ks.load(it, "camnet-ssl".toCharArray()) }
     }
 
-    fun start() { engine.start(wait = false); started = true }
-    fun stop()  { engine.stop(0, 0); started = false }
+    private val engine = embeddedServer(CIO, port = port) {
+        install(WebSockets) {
+            pingPeriod = Duration.ofSeconds(15)
+            timeout    = Duration.ofSeconds(60)
+        }
+        routing {
+            webSocket("/")    { handleSocket(this) }
+            get("/api/info")  { serveApiInfo(call) }
+            get("/")          { serveAsset(call) }
+            get("/{path...}") { serveAsset(call) }
+        }
+    }
+
+    private val sslProxy = SslProxy(
+        sslPort     = SSL_PORT,
+        backendPort = port,
+        keyStore    = keyStore,
+    )
+
+    fun start() { engine.start(wait = false); sslProxy.start(); started = true }
+    fun stop()  { sslProxy.stop(); engine.stop(0, 0); started = false }
     val isAlive get() = started
 
     // ── WebSocket session handler ─────────────────────────────────
@@ -222,7 +216,7 @@ class CamNetServer(port: Int, private val assets: AssetManager) {
         val ips   = localIPs()
         val first = ips.firstOrNull()
         val arr   = ips.joinToString(",") { """{"address":"$it","family":"IPv4","internal":false}""" }
-        val json  = """{"lanIP":${if (first != null) "\"$first\"" else "null"},"allIPs":[$arr]}"""
+        val json  = """{"lanIP":${if (first != null) "\"$first\"" else "null"},"allIPs":[$arr],"sslPort":$SSL_PORT}"""
         call.respondText(json, ContentType.Application.Json)
     }
 
@@ -282,4 +276,8 @@ class CamNetServer(port: Int, private val assets: AssetManager) {
 
     private fun jObj(vararg pairs: Pair<String, Any?>): JSONObject =
         JSONObject().also { o -> pairs.forEach { (k, v) -> if (v != null) o.put(k, v) } }
+
+    companion object {
+        const val SSL_PORT = 3443
+    }
 }
