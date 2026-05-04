@@ -16,7 +16,7 @@ import androidx.core.content.ContextCompat
 
 class MainActivity : AppCompatActivity() {
 
-    private lateinit var webView: WebView
+    internal lateinit var webView: WebView
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -135,7 +135,7 @@ class MainActivity : AppCompatActivity() {
         <h1>📷 Join Session</h1>
         <p>Enter the IP address shown on the Monitor phone</p>
         <div class="row">
-          <span class="prefix">https://</span>
+          <span class="prefix">http://</span>
           <input id="ip" type="text" inputmode="decimal" placeholder="192.168.0.43"
                  autocomplete="off" autocorrect="off" spellcheck="false">
           <span class="suffix">:3000</span>
@@ -149,7 +149,7 @@ class MainActivity : AppCompatActivity() {
             var ip=document.getElementById('ip').value.trim().replace(/[\/\s]/g,'');
             if(!ip)return;
             document.querySelector('button').textContent='Connecting…';
-            AndroidBridge.setServerUrl('https://'+ip+':3000');
+            AndroidBridge.setServerUrl('http://'+ip+':3000');
           }
           document.getElementById('ip').addEventListener('keydown',function(e){
             if(e.key==='Enter')connect();

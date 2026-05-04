@@ -59,8 +59,30 @@ class AndroidBridge(
         } catch (e: Exception) {
             android.util.Log.w("CamNet", "startSignalingService failed: $e")
         }
+        // Load a splash that polls localhost until Ktor is ready, then redirects.
+        // Avoids ERR_EMPTY_RESPONSE when WebView connects before the port is bound.
+        val port = SignalingService.PORT
+        val splash = """
+            <!DOCTYPE html><html><head>
+            <meta name="viewport" content="width=device-width,initial-scale=1">
+            <style>*{margin:0;padding:0}body{background:#090910;color:#94a3b8;
+              font-family:-apple-system,sans-serif;display:flex;align-items:center;
+              justify-content:center;min-height:100vh;font-size:16px;gap:12px}</style>
+            </head><body>
+            <div class="spinner" style="width:24px;height:24px;border:3px solid #1e293b;
+              border-top-color:#3b82f6;border-radius:50%;animation:s 0.8s linear infinite"></div>
+            <style>@keyframes s{to{transform:rotate(360deg)}}</style>
+            <span>Starting server…</span>
+            <script>
+              (function poll(){
+                fetch('http://localhost:$port/api/info',{cache:'no-store'})
+                  .then(()=>location.replace('http://localhost:$port/viewer.html'))
+                  .catch(()=>setTimeout(poll,400));
+              })();
+            </script></body></html>
+        """.trimIndent()
         (context as? MainActivity)?.runOnUiThread {
-            onLoadUrl("http://localhost:${SignalingService.PORT}/viewer.html")
+            (context as? MainActivity)?.webView?.loadData(splash, "text/html", "UTF-8")
         }
     }
 
