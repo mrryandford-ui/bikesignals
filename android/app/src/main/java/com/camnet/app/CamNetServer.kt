@@ -18,6 +18,7 @@ import java.io.IOException
 import java.net.Inet4Address
 import java.net.NetworkInterface
 import java.net.URLConnection
+import java.security.KeyStore
 import java.time.Duration
 import java.util.Timer
 import java.util.TimerTask
@@ -25,9 +26,9 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * HTTP + WebSocket signaling server built on Ktor/CIO.
- * Serves static assets from Android assets/public/ and relays WebRTC
- * signaling messages between viewer and camera peers.
+ * HTTPS + WSS signaling server built on Ktor/CIO with a bundled self-signed cert.
+ * HTTPS is required so camera phones can access navigator.mediaDevices (secure-context
+ * requirement). The WebView bypasses the cert error via onReceivedSslError.proceed().
  */
 class CamNetServer(port: Int, private val assets: AssetManager) {
 
@@ -54,17 +55,34 @@ class CamNetServer(port: Int, private val assets: AssetManager) {
     private val rooms = ConcurrentHashMap<String, Room>()
     @Volatile private var started = false
 
-    private val engine = embeddedServer(CIO, port = port) {
-        install(WebSockets) {
-            pingPeriod = Duration.ofSeconds(15)
-            timeout    = Duration.ofSeconds(60)
+    private val engine: ApplicationEngine = run {
+        val ks = KeyStore.getInstance("PKCS12").also { keyStore ->
+            assets.open("camnet-ssl.p12").use { keyStore.load(it, "camnet-ssl".toCharArray()) }
         }
-        routing {
-            webSocket("/")    { handleSocket(this) }
-            get("/api/info")  { serveApiInfo(call) }
-            get("/")          { serveAsset(call) }
-            get("/{path...}") { serveAsset(call) }
+        val env = applicationEngineEnvironment {
+            sslConnector(
+                keyStore = ks,
+                keyAlias = "camnet",
+                keyStorePassword = { "camnet-ssl".toCharArray() },
+                privateKeyPassword = { "camnet-ssl".toCharArray() },
+            ) {
+                host = "0.0.0.0"
+                this.port = port
+            }
+            module {
+                install(WebSockets) {
+                    pingPeriod = Duration.ofSeconds(15)
+                    timeout    = Duration.ofSeconds(60)
+                }
+                routing {
+                    webSocket("/")    { handleSocket(this) }
+                    get("/api/info")  { serveApiInfo(call) }
+                    get("/")          { serveAsset(call) }
+                    get("/{path...}") { serveAsset(call) }
+                }
+            }
         }
+        embeddedServer(CIO, env)
     }
 
     fun start() { engine.start(wait = false); started = true }

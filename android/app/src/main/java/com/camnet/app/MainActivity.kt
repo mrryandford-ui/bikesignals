@@ -135,21 +135,21 @@ class MainActivity : AppCompatActivity() {
         <h1>📷 Join Session</h1>
         <p>Enter the IP address shown on the Monitor phone</p>
         <div class="row">
-          <span class="prefix">http://</span>
+          <span class="prefix">https://</span>
           <input id="ip" type="text" inputmode="decimal" placeholder="192.168.0.43"
                  autocomplete="off" autocorrect="off" spellcheck="false">
           <span class="suffix">:3000</span>
         </div>
         <button onclick="connect()">Connect &rarr;</button>
         <button class="back" onclick="AndroidBridge.showCameraSetup !== undefined && history.back()">← Back</button>
-        <p class="hint">First visit: tap Advanced &rarr; Proceed (once only)</p>
+        <p class="hint">First visit: tap Advanced → Proceed (once only)</p>
         <script>
           document.getElementById('ip').focus();
           function connect(){
             var ip=document.getElementById('ip').value.trim().replace(/[\/\s]/g,'');
             if(!ip)return;
             document.querySelector('button').textContent='Connecting…';
-            AndroidBridge.setServerUrl('http://'+ip+':3000');
+            AndroidBridge.setServerUrl('https://'+ip+':3000');
           }
           document.getElementById('ip').addEventListener('keydown',function(e){
             if(e.key==='Enter')connect();
