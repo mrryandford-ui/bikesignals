@@ -3,3 +3,10 @@ node_modules/
 .env
 *.log
 .DS_Store
+
+# Android build artifacts
+android/.gradle/
+android/app/build/
+android/local.properties
+android/app/release/
+android/app/camnet-debug.jks

@@ -10,6 +10,7 @@ const ICE_SERVERS = [
 // ── State ──────────────────────────────────────────────────────
 let ws = null;
 let roomId = null;
+let joinURL = null; // full URL camera phones should open (uses LAN IP, not localhost)
 const peers = new Map(); // cameraId → { pc, name, stream, recorder, motion, ... }
 
 let globalMotion = false;
@@ -32,7 +33,11 @@ function connectWS() {
 
   ws.onopen = () => {
     setWsStatus('connected');
-    ws.send(JSON.stringify({ type: 'create-room' }));
+    const saved = sessionStorage.getItem('camnet_room');
+    ws.send(JSON.stringify(saved
+      ? { type: 'rejoin-room', roomId: saved }
+      : { type: 'create-room' }
+    ));
   };
 
   ws.onmessage = (e) => {
@@ -62,27 +67,33 @@ function setWsStatus(state) {
 // ── Message handler ────────────────────────────────────────────
 async function onMessage(msg) {
   switch (msg.type) {
-    case 'room-created':   onRoomCreated(msg.roomId);            break;
-    case 'camera-joined':  onCameraJoined(msg.cameraId, msg.cameraName); break;
-    case 'camera-left':    onCameraLeft(msg.cameraId);           break;
-    case 'offer':          await handleOffer(msg);               break;
-    case 'ice-candidate':  await handleIce(msg);                 break;
-    case 'camera-status':  onCameraStatus(msg);                  break;
-    case 'pong':           onPong(msg);                          break;
+    case 'room-created':    onRoomCreated(msg.roomId); break;
+    case 'room-rejoined':   onRoomCreated(msg.roomId); break; // same UI update
+    case 'camera-joined':   onCameraJoined(msg.cameraId, msg.cameraName); break;
+    case 'camera-left':     onCameraLeft(msg.cameraId);           break;
+    case 'offer':           await handleOffer(msg);               break;
+    case 'ice-candidate':   await handleIce(msg);                 break;
+    case 'camera-status':   onCameraStatus(msg);                  break;
+    case 'pong':            onPong(msg);                          break;
   }
 }
 
 // ── Room created ───────────────────────────────────────────────
 function onRoomCreated(id) {
   roomId = id;
+  sessionStorage.setItem('camnet_room', id);
+  const port = location.port ? `:${location.port}` : '';
+  const ip   = window._lanIP;
+  const base = ip ? `${location.protocol}//${ip}${port}` : location.origin;
+  joinURL = `${base}/?room=${id}`;
+
   document.getElementById('roomCode').textContent = id;
   document.getElementById('panelRoomCode').textContent = id;
-  buildQR(id);
+  buildQR(joinURL);
   document.getElementById('emptyState').classList.remove('hidden');
 }
 
-function buildQR(id) {
-  const url = `${location.origin}/?room=${id}`;
+function buildQR(url) {
   ['qrContainer', 'panelQr'].forEach(elId => {
     const el = document.getElementById(elId);
     el.innerHTML = '';
@@ -174,6 +185,7 @@ function updateConnState(cameraId, state) {
 function onCameraStatus({ cameraId, facingMode, muted, torch, quality: q }) {
   const peer = peers.get(cameraId);
   if (!peer) return;
+
   if (facingMode !== undefined) {
     peer.facingMode = facingMode;
     applyMirror(cameraId);
@@ -549,8 +561,8 @@ document.getElementById('renameConfirmBtn').addEventListener('click', () => {
 function openPanel(id)  { document.getElementById(id).classList.remove('hidden'); }
 function closePanel(id) { document.getElementById(id).classList.add('hidden'); }
 
-document.querySelectorAll('.panel-backdrop').forEach(bd => {
-  bd.addEventListener('click', () => closePanel(bd.dataset.close));
+document.querySelectorAll('.panel-backdrop, .panel-close').forEach(el => {
+  el.addEventListener('click', () => closePanel(el.dataset.close));
 });
 
 // ── Header controls ────────────────────────────────────────────
@@ -573,9 +585,9 @@ document.getElementById('layoutSeg').addEventListener('click', (e) => {
 
 // Session panel actions
 document.getElementById('copyCodeBtn').addEventListener('click',    () => copyToClipboard(roomId, 'Code copied!'));
-document.getElementById('copyLinkBtn').addEventListener('click',    () => copyToClipboard(`${location.origin}/?room=${roomId}`, 'Link copied!'));
+document.getElementById('copyLinkBtn').addEventListener('click',    () => copyToClipboard(joinURL, 'Link copied!'));
 document.getElementById('panelCopyCode').addEventListener('click',  () => copyToClipboard(roomId, 'Code copied!'));
-document.getElementById('panelCopyLink').addEventListener('click',  () => copyToClipboard(`${location.origin}/?room=${roomId}`, 'Link copied!'));
+document.getElementById('panelCopyLink').addEventListener('click',  () => copyToClipboard(joinURL, 'Link copied!'));
 document.getElementById('newSessionBtn').addEventListener('click',  () => {
   closePanel('sessionPanel');
   wsSend({ type: 'create-room' });
@@ -665,4 +677,47 @@ function escHtml(s) {
 }
 
 // ── Boot ───────────────────────────────────────────────────────
-connectWS();
+// Fetch LAN IP before connecting so the QR is correct from the start.
+// /api/info is excluded from SW cache so this is always fresh.
+fetch('/api/info')
+  .then(r => r.json())
+  .then(d => {
+    const port = location.port ? `:${location.port}` : '';
+    const box  = document.getElementById('serverUrlBox');
+    const disp = document.getElementById('serverUrlDisplay');
+
+    // Use best-guess IP for QR; show ALL detected IPs so user can pick if wrong
+    const ips = d.lanIP
+      ? [d.lanIP, ...(d.allIPs || []).map(i => i.address).filter(a => a !== d.lanIP)]
+      : (d.allIPs || []).map(i => i.address);
+
+    if (ips.length === 0) {
+      disp.textContent = '⚠ No network IP found — are you on WiFi?';
+      disp.style.color = 'var(--accent-r)';
+      box.style.display = 'block';
+    } else {
+      window._lanIP = ips[0];
+      disp.innerHTML = ips.map((ip, i) => {
+        const url = `${location.protocol}//${ip}${port}`;
+        const label = i === 0 ? '✓ ' : '  ';
+        return `<div style="padding:3px 0;cursor:pointer" data-url="${url}">${label}${url}</div>`;
+      }).join('');
+      // Tap any IP line to set it as the active one
+      disp.addEventListener('click', (e) => {
+        const row = e.target.closest('[data-url]');
+        if (!row) return;
+        const chosenURL = row.dataset.url;
+        const chosenIP  = new URL(chosenURL).hostname;
+        window._lanIP   = chosenIP;
+        joinURL = `${chosenURL}/?room=${roomId}`;
+        buildQR(joinURL);
+        // Mark selected
+        disp.querySelectorAll('[data-url]').forEach(r => r.textContent = '  ' + r.dataset.url);
+        row.textContent = '✓ ' + chosenURL;
+        copyToClipboard(joinURL, 'Link copied!');
+      });
+      box.style.display = 'block';
+    }
+  })
+  .catch(() => {})
+  .finally(() => connectWS());

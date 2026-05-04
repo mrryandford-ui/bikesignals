@@ -9,6 +9,18 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
   <link rel="stylesheet" href="/css/app.css">
+  <script>
+    // If opened on localhost, bounce to the real LAN IP immediately.
+    // Runs before anything else so the address bar, QR, and WS all use the real IP.
+    if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+      fetch('/api/info')
+        .then(r => r.json())
+        .then(d => {
+          if (d.lanIP) location.replace(location.href.replace(location.hostname, d.lanIP));
+        })
+        .catch(() => {});
+    }
+  </script>
 </head>
 <body>
 <div class="viewer-app" id="app">
@@ -37,6 +49,11 @@
       <div class="session-label">Session Code</div>
       <div class="room-code" id="roomCode">------</div>
       <div id="qrContainer"></div>
+      <div class="server-url-box" id="serverUrlBox" style="display:none">
+        <div class="session-label" style="margin-bottom:4px">Camera phones open this URL</div>
+        <div id="serverUrlDisplay" style="font-size:13px;font-weight:700;color:var(--accent);word-break:break-all;text-align:center;padding:8px 12px;background:rgba(59,130,246,0.08);border-radius:8px;cursor:pointer" title="Tap to copy"></div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:4px;text-align:center">tap to copy · or scan QR above</div>
+      </div>
       <p class="session-hint">Open CamNet on other phones, choose <strong>Camera</strong>, and enter this code</p>
       <div class="session-actions">
         <button class="btn btn-outline" id="copyCodeBtn">📋 Copy code</button>
@@ -53,8 +70,7 @@
 <div class="panel hidden" id="sessionPanel">
   <div class="panel-backdrop" data-close="sessionPanel"></div>
   <div class="panel-sheet">
-    <div class="panel-handle"></div>
-    <div class="panel-title">Session</div>
+    <div class="panel-header"><span class="panel-title">Session</span><button class="panel-close" data-close="sessionPanel">✕</button></div>
     <div class="panel-row">
       <span class="panel-label">Room code</span>
       <span id="panelRoomCode" style="font-size:22px;font-weight:900;letter-spacing:4px;color:var(--accent)">------</span>
@@ -75,8 +91,7 @@
 <div class="panel hidden" id="layoutPanel">
   <div class="panel-backdrop" data-close="layoutPanel"></div>
   <div class="panel-sheet">
-    <div class="panel-handle"></div>
-    <div class="panel-title">Layout</div>
+    <div class="panel-header"><span class="panel-title">Layout</span><button class="panel-close" data-close="layoutPanel">✕</button></div>
     <div class="panel-row">
       <span class="panel-label">Grid size</span>
       <div class="seg-ctrl" id="layoutSeg">
@@ -93,8 +108,7 @@
 <div class="panel hidden" id="settingsPanel">
   <div class="panel-backdrop" data-close="settingsPanel"></div>
   <div class="panel-sheet">
-    <div class="panel-handle"></div>
-    <div class="panel-title">Settings</div>
+    <div class="panel-header"><span class="panel-title">Settings</span><button class="panel-close" data-close="settingsPanel">✕</button></div>
     <div class="panel-row">
       <span class="panel-label">Motion detection</span>
       <button class="toggle" id="globalMotionToggle" aria-label="Motion detection"></button>

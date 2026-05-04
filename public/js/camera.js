@@ -50,6 +50,8 @@ async function startJoin() {
   hideError();
   setJoinLoading(true);
   roomId = code;
+  // Create AudioContext here — must be inside a user gesture
+  _initAudioCtx();
   try {
     await initMedia();
     connectWS();
@@ -62,26 +64,33 @@ async function startJoin() {
 // ── Media ──────────────────────────────────────────────────────
 async function initMedia() {
   const q = QUALITY[quality];
-  const constraints = {
-    video: {
-      facingMode: { ideal: facingMode },
-      width:      { ideal: q.width },
-      height:     { ideal: q.height },
-      frameRate:  { ideal: q.frameRate },
-    },
-    audio: {
-      echoCancellation: true,
-      noiseSuppression: true,
-      sampleRate: 44100,
-    },
+  const video = {
+    facingMode: { ideal: facingMode },
+    width:      { ideal: q.width },
+    height:     { ideal: q.height },
+    frameRate:  { ideal: q.frameRate },
   };
+  const audio = { echoCancellation: true, noiseSuppression: true };
 
   if (localStream) localStream.getTracks().forEach(t => t.stop());
-  localStream = await navigator.mediaDevices.getUserMedia(constraints);
 
-  const video = document.getElementById('localVideo');
-  video.srcObject = localStream;
-  video.classList.toggle('mirror', facingMode === 'user');
+  try {
+    localStream = await navigator.mediaDevices.getUserMedia({ video, audio });
+  } catch {
+    try {
+      // Specific constraints rejected — try basic audio (device chooses format)
+      localStream = await navigator.mediaDevices.getUserMedia({ video, audio: true });
+    } catch {
+      // No mic at all — stream video only
+      localStream = await navigator.mediaDevices.getUserMedia({ video, audio: false });
+      micEnabled = false;
+      showToast('Mic unavailable — video only');
+    }
+  }
+
+  const vid = document.getElementById('localVideo');
+  vid.srcObject = localStream;
+  vid.classList.toggle('mirror', facingMode === 'user');
 
   sendStatus();
 }
@@ -142,11 +151,21 @@ async function onMessage(msg) {
       break;
 
     case 'viewer-disconnected':
-      setConnStatus('disconnected', 'Viewer disconnected');
+      setConnStatus('disconnected', 'Viewer away — waiting…');
       closePeer();
       break;
 
+    case 'viewer-reconnected':
+      setConnStatus('connecting', 'Viewer reconnected…');
+      await createPeer();
+      break;
+
     case 'error':
+      // Ignore NO_ROOM if we're already on the live screen — viewer may still be reconnecting
+      if (msg.code === 'NO_ROOM' && localStream) {
+        setConnStatus('disconnected', 'Session expired — tap End to restart');
+        return;
+      }
       showError(msg.message || 'Connection error');
       setJoinLoading(false);
       break;
@@ -336,10 +355,14 @@ document.getElementById('flipBtn').addEventListener('click', flipCamera);
 document.getElementById('hangupBtn').addEventListener('click', hangup);
 
 function hangup() {
+  exitStealth();
   closePeer();
   if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
   if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
+  stopKeepAlive();
   ws?.close();
+  // Native app: stop foreground service
+  window.AndroidBridge?.stopStreaming();
   showSetupScreen();
 }
 
@@ -367,12 +390,28 @@ function showLiveScreen() {
   document.getElementById('liveScreen').classList.remove('hidden');
   document.getElementById('liveRoomCode').textContent = roomId;
   setJoinLoading(false);
+  startKeepAlive();
+  // Native app: start foreground service so camera stays alive with screen off
+  window.AndroidBridge?.startStreaming();
 }
 
 function showSetupScreen() {
   document.getElementById('liveScreen').classList.add('hidden');
   document.getElementById('setupScreen').classList.remove('hidden');
   setConnStatus('disconnected', 'Disconnected');
+}
+
+// ── Native: long-press session code → reset server URL ─────────
+if (window.AndroidBridge) {
+  let _lpTimer = null;
+  const codeEl = document.getElementById('liveRoomCode');
+  codeEl.addEventListener('touchstart', () => {
+    _lpTimer = setTimeout(() => {
+      window.AndroidBridge.resetServer();
+    }, 1500);
+  });
+  codeEl.addEventListener('touchend',   () => clearTimeout(_lpTimer));
+  codeEl.addEventListener('touchmove',  () => clearTimeout(_lpTimer));
 }
 
 function setJoinLoading(loading) {
@@ -390,19 +429,138 @@ function hideError() {
   document.getElementById('errorMsg').classList.remove('show');
 }
 
-// ── Wake lock (prevent screen sleep) ──────────────────────────
+// ── Keep-alive: route silent audio through <audio> element so   ──
+// ── Android grants audio focus and won't suspend the tab        ──
+let _audioCtx      = null;
+let _keepAliveAudio = null;
+
+function _initAudioCtx() {
+  if (_audioCtx) return;
+  try {
+    _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    _audioCtx.resume().catch(() => {});
+  } catch (e) {}
+}
+
+function startKeepAlive() {
+  if (_keepAliveAudio) return;
+  try {
+    _initAudioCtx();
+    if (!_audioCtx) return;
+
+    const osc  = _audioCtx.createOscillator();
+    const gain = _audioCtx.createGain();
+    gain.gain.value = 0.001;
+
+    // Route to a MediaStream → <audio> element so Android gives us audio focus
+    const dest = _audioCtx.createMediaStreamDestination();
+    osc.connect(gain);
+    gain.connect(dest);
+    osc.start();
+
+    _keepAliveAudio = new Audio();
+    _keepAliveAudio.srcObject = dest.stream;
+    _keepAliveAudio.volume    = 0.001;
+    _keepAliveAudio.play().catch(() => {});
+
+    // Tell Android OS this is intentional media — prevents tab suspension
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: 'CamNet Camera',
+        artist: 'Streaming…',
+      });
+      navigator.mediaSession.playbackState = 'playing';
+    }
+  } catch (e) {
+    console.warn('Keep-alive failed:', e);
+  }
+}
+
+function stopKeepAlive() {
+  if (_keepAliveAudio) {
+    _keepAliveAudio.pause();
+    _keepAliveAudio.srcObject = null;
+    _keepAliveAudio = null;
+  }
+  if (_audioCtx) {
+    _audioCtx.close().catch(() => {});
+    _audioCtx = null;
+  }
+  if ('mediaSession' in navigator) {
+    navigator.mediaSession.playbackState = 'none';
+  }
+}
+
+// ── Wake Lock ──────────────────────────────────────────────────
 async function requestWakeLock() {
   if (!('wakeLock' in navigator)) return;
   try {
     wakeLock = await navigator.wakeLock.request('screen');
     wakeLock.addEventListener('release', () => { wakeLock = null; });
-  } catch {}
+  } catch (e) {
+    console.warn('Wake lock failed:', e);
+  }
 }
 
-// Re-acquire wake lock when tab becomes visible
+// ── Stealth mode ───────────────────────────────────────────────
+// Wake Lock keeps the screen physically on; black overlay makes it look off.
+// The tab stays foreground, the camera keeps streaming continuously.
+let stealthTapCount = 0;
+let stealthTapTimer = null;
+
+document.getElementById('stealthBtn').addEventListener('click', enterStealth);
+
+async function enterStealth() {
+  document.getElementById('stealthOverlay').style.display = 'block';
+  if (!wakeLock) await requestWakeLock();
+}
+
+function exitStealth() {
+  stealthTapCount = 0;
+  clearTimeout(stealthTapTimer);
+  document.getElementById('stealthOverlay').style.display = 'none';
+}
+
+document.getElementById('stealthOverlay').addEventListener('click', () => {
+  stealthTapCount++;
+  clearTimeout(stealthTapTimer);
+
+  const hint = document.getElementById('stealthTapHint');
+  hint.style.color = '#444';
+  setTimeout(() => { hint.style.color = '#111'; }, 300);
+
+  if (stealthTapCount >= 3) {
+    exitStealth();
+  } else {
+    stealthTapTimer = setTimeout(() => { stealthTapCount = 0; }, 2000);
+  }
+});
+
+// ── Visibility change — wake lock + stream recovery ────────────
+// If the physical power button is pressed while NOT in stealth, the OS may
+// kill camera access. On return, reacquire the wake lock and restart the
+// camera track if the OS ended it.
 document.addEventListener('visibilitychange', async () => {
-  if (document.visibilityState === 'visible' && localStream && !wakeLock) {
-    await requestWakeLock();
+  if (!localStream || document.visibilityState !== 'visible') return;
+  if (!wakeLock) await requestWakeLock();
+  if (_audioCtx?.state === 'suspended') _audioCtx.resume().catch(() => {});
+  if (_keepAliveAudio?.paused)          _keepAliveAudio.play().catch(() => {});
+  const vTrack = localStream.getVideoTracks()[0];
+  if (vTrack && vTrack.readyState === 'ended') {
+    try {
+      await initMedia();
+      if (pc) {
+        const newV = localStream.getVideoTracks()[0];
+        const newA = localStream.getAudioTracks()[0];
+        for (const sender of pc.getSenders()) {
+          if (sender.track?.kind === 'video' && newV) await sender.replaceTrack(newV).catch(() => {});
+          if (sender.track?.kind === 'audio' && newA) await sender.replaceTrack(newA).catch(() => {});
+        }
+        localStream.getAudioTracks().forEach(t => { t.enabled = micEnabled; });
+      }
+    } catch (e) {
+      console.warn('Camera recovery failed:', e);
+    }
   }
 });
 
