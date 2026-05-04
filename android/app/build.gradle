@@ -49,4 +49,15 @@ android {
 dependencies {
     implementation 'androidx.appcompat:appcompat:1.6.1'
     implementation 'androidx.core:core-ktx:1.12.0'
+    implementation 'org.nanohttpd:nanohttpd-websockets:2.3.1'
+}
+
+// Copy public/ web assets into assets before each build so the embedded
+// server always serves the latest HTML/JS/CSS.
+task copyWebAssets(type: Copy) {
+    from '../../public'
+    into 'src/main/assets/public'
+}
+afterEvaluate {
+    preBuild.dependsOn copyWebAssets
 }
