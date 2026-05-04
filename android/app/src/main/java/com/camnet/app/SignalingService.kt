@@ -40,8 +40,13 @@ class SignalingService : Service() {
             } else {
                 startForeground(NOTIF_ID, notification)
             }
-        } catch (e: Exception) {
-            Log.w(TAG, "startForeground failed: $e")
+        } catch (t: Throwable) {
+            // If startForeground fails we must stop immediately — if we don't call
+            // startForeground within 5 s Android kills the service, and START_STICKY
+            // would restart it into the same crash loop.
+            Log.w(TAG, "startForeground failed: $t")
+            stopSelf()
+            return START_NOT_STICKY
         }
 
         if (server?.isAlive != true) {
@@ -51,6 +56,7 @@ class SignalingService : Service() {
             } catch (t: Throwable) {
                 Log.e(TAG, "Failed to start signaling server: $t")
                 stopSelf()
+                return START_NOT_STICKY
             }
         }
         return START_STICKY

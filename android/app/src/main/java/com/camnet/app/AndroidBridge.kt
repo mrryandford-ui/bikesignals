@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.webkit.JavascriptInterface
 import androidx.core.content.ContextCompat
+import kotlin.concurrent.thread
 
 class AndroidBridge(
     private val context: Context,
@@ -58,20 +59,22 @@ class AndroidBridge(
     @JavascriptInterface
     fun startMonitor() {
         val port = SignalingService.PORT
-        (context as? MainActivity)?.runOnUiThread {
+        val activity = context as? MainActivity ?: return
+        activity.runOnUiThread {
             // Start service on UI thread — required on Android 14+ when calling from
             // a @JavascriptInterface (which otherwise runs on a background thread).
             try {
                 ContextCompat.startForegroundService(context, Intent(context, SignalingService::class.java))
             } catch (t: Throwable) {
                 android.util.Log.w("CamNet", "startSignalingService failed: $t")
+                android.widget.Toast.makeText(context, "Failed to start server: $t", android.widget.Toast.LENGTH_LONG).show()
+                return@runOnUiThread
             }
 
-            // Splash page rooted at http://localhost:<port>/ so fetch('/api/info')
-            // is same-origin (no CORS) and location.replace navigates within the
-            // same origin. Using loadData() would give a null origin and block the fetch.
-            val base = "http://localhost:$port/"
-            val splash = """
+            // Show a native spinner while Kotlin polls for the server — avoids
+            // relying on WebView's JS fetch(), which can be blocked by Samsung's
+            // network security sandbox on Android 14.
+            val spinner = """
                 <!DOCTYPE html><html><head>
                 <meta name="viewport" content="width=device-width,initial-scale=1">
                 <style>*{margin:0;padding:0}body{background:#090910;color:#94a3b8;
@@ -82,17 +85,33 @@ class AndroidBridge(
                   border-top-color:#3b82f6;border-radius:50%;animation:s 0.8s linear infinite"></div>
                 <style>@keyframes s{to{transform:rotate(360deg)}}</style>
                 <span style="font-size:15px">Starting server…</span>
-                <script>
-                  (function poll(n){
-                    if(n>30){AndroidBridge.resetServer();return;}
-                    fetch('/api/info',{cache:'no-store'})
-                      .then(()=>location.replace('/viewer.html'))
-                      .catch(()=>setTimeout(()=>poll(n+1),400));
-                  })(0);
-                </script></body></html>
+                </body></html>
             """.trimIndent()
-            (context as? MainActivity)?.webView
-                ?.loadDataWithBaseURL(base, splash, "text/html", "UTF-8", null)
+            activity.webView.loadDataWithBaseURL(
+                "http://localhost:$port/", spinner, "text/html", "UTF-8", null
+            )
+        }
+
+        // Poll TCP port from a background thread — no JS or WebView fetch needed.
+        thread(isDaemon = true, name = "camnet-server-poll") {
+            repeat(40) {
+                if (SignalingService.isRunning()) {
+                    activity.runOnUiThread {
+                        activity.webView.loadUrl("http://localhost:$port/viewer.html")
+                    }
+                    return@thread
+                }
+                try { java.net.Socket("127.0.0.1", port).use {} } catch (_: Exception) {}
+                Thread.sleep(500)
+            }
+            // Server never came up — show a useful error
+            activity.runOnUiThread {
+                android.widget.Toast.makeText(
+                    context, "Server failed to start. Check notifications or restart the app.",
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
+                activity.showHome()
+            }
         }
     }
 
