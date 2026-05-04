@@ -220,6 +220,32 @@ async function handleCommand({ command, value }) {
     case 'unmute':
       setMic(true);
       break;
+    case 'torch-toggle':
+      await setTorch(!torchOn);
+      break;
+    case 'stealth':
+      enterStealth();
+      break;
+    case 'quality':
+      if (QUALITY[value]) {
+        quality = value;
+        document.getElementById('qualityLabel').textContent = `${value}p`;
+        document.querySelectorAll('.quality-item').forEach(i => {
+          i.classList.toggle('selected', parseInt(i.dataset.q, 10) === value);
+        });
+        try {
+          await initMedia();
+          if (pc) {
+            const newTrack = localStream.getVideoTracks()[0];
+            const sender = pc.getSenders().find(s => s.track?.kind === 'video');
+            if (sender && newTrack) await sender.replaceTrack(newTrack);
+            applyBitrate();
+          }
+        } catch (e) {
+          console.warn('Remote quality change failed:', e);
+        }
+      }
+      break;
     case 'disconnect':
       hangup();
       break;
@@ -331,6 +357,7 @@ function sendStatus() {
     facingMode,
     muted: !micEnabled,
     torch: torchOn,
+    quality,
   });
 }
 

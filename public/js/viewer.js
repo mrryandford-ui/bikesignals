@@ -115,7 +115,7 @@ function onCameraJoined(cameraId, name) {
     if (pc.iceConnectionState === 'failed') pc.restartIce();
   };
 
-  peers.set(cameraId, { pc, name, stream: null, recorder: null, motion: null, facingMode: null });
+  peers.set(cameraId, { pc, name, stream: null, recorder: null, motion: null, facingMode: null, torchOn: false, quality: 720 });
   addCameraCard(cameraId, name);
   updateCamCount();
 }
@@ -171,7 +171,7 @@ function updateConnState(cameraId, state) {
   if (overlay) overlay.classList.toggle('hidden', state === 'connected');
 }
 
-function onCameraStatus({ cameraId, facingMode, muted, torch }) {
+function onCameraStatus({ cameraId, facingMode, muted, torch, quality: q }) {
   const peer = peers.get(cameraId);
   if (!peer) return;
   if (facingMode !== undefined) {
@@ -180,7 +180,17 @@ function onCameraStatus({ cameraId, facingMode, muted, torch }) {
   }
   if (muted !== undefined) {
     const btn = document.querySelector(`#card-${cameraId} [data-action="mute"]`);
-    if (btn) btn.title = muted ? 'Unmute' : 'Mute';
+    if (btn) { btn.title = muted ? 'Unmute' : 'Mute'; btn.textContent = muted ? '🔇' : '🔊'; btn.classList.toggle('active', muted); }
+  }
+  if (torch !== undefined) {
+    peer.torchOn = torch;
+    const btn = document.querySelector(`#card-${cameraId} [data-action="flash"]`);
+    if (btn) btn.classList.toggle('active', torch);
+  }
+  if (q !== undefined) {
+    peer.quality = q;
+    const btn = document.querySelector(`#card-${cameraId} [data-action="quality"]`);
+    if (btn) btn.title = `Quality: ${q}p (tap to cycle)`;
   }
 }
 
@@ -229,14 +239,17 @@ function addCameraCard(cameraId, name) {
       <span class="latency-badge" style="margin-left:auto">—</span>
     </div>
     <div class="cam-controls">
-      <button class="icon-btn" data-action="fullscreen" title="Fullscreen">⛶</button>
-      <button class="icon-btn" data-action="snapshot"   title="Snapshot">📸</button>
-      <button class="icon-btn" data-action="mute"       title="Mute">🔊</button>
+      <button class="icon-btn" data-action="fullscreen"  title="Fullscreen">⛶</button>
+      <button class="icon-btn" data-action="snapshot"    title="Snapshot">📸</button>
+      <button class="icon-btn" data-action="record"      title="Record">⏺</button>
+      <button class="icon-btn" data-action="mute"        title="Mute">🔊</button>
       <button class="icon-btn" data-action="nightvision" title="Night vision">🌙</button>
-      <button class="icon-btn" data-action="motion"     title="Motion detect">👁</button>
-      <button class="icon-btn" data-action="record"     title="Record">⏺</button>
-      <button class="icon-btn" data-action="flip"       title="Flip camera">🔄</button>
-      <button class="icon-btn" data-action="rename"     title="Rename">✏️</button>
+      <button class="icon-btn" data-action="motion"      title="Motion detect">👁</button>
+      <button class="icon-btn" data-action="flip"        title="Flip camera (remote)">🔄</button>
+      <button class="icon-btn" data-action="flash"       title="Toggle flash (remote)">🔦</button>
+      <button class="icon-btn" data-action="stealth"     title="Stealth mode (remote)">🌑</button>
+      <button class="icon-btn" data-action="quality"     title="Quality: 720p (tap to cycle)">🎞️</button>
+      <button class="icon-btn" data-action="rename"      title="Rename">✏️</button>
       <button class="icon-btn danger" data-action="disconnect" title="Disconnect">✕</button>
     </div>
   `;
@@ -302,6 +315,31 @@ function handleCardAction(cameraId, action, btn) {
       btn.style.transform = 'rotate(180deg)';
       setTimeout(() => btn.style.transform = '', 400);
       break;
+
+    case 'flash': {
+      peer.torchOn = !peer.torchOn;
+      wsSend({ type: 'camera-command', cameraId, command: 'torch-toggle' });
+      btn.classList.toggle('active', peer.torchOn);
+      break;
+    }
+
+    case 'stealth':
+      wsSend({ type: 'camera-command', cameraId, command: 'stealth' });
+      btn.classList.add('active');
+      setTimeout(() => btn.classList.remove('active'), 1500);
+      showToast(`Stealth sent to ${peer.name}`);
+      break;
+
+    case 'quality': {
+      const quals = [240, 480, 720, 1080];
+      const cur = peer.quality || 720;
+      const next = quals[(quals.indexOf(cur) + 1) % quals.length];
+      peer.quality = next;
+      wsSend({ type: 'camera-command', cameraId, command: 'quality', value: next });
+      btn.title = `Quality: ${next}p (tap to cycle)`;
+      showToast(`${peer.name} → ${next}p`);
+      break;
+    }
 
     case 'rename':
       openRename(cameraId);
@@ -393,10 +431,20 @@ function showRecIndicator(cameraId, show) {
 }
 
 // ── Motion detection ───────────────────────────────────────────
+let motionNotifEnabled = false;
+let motionAutoSnap     = false;
+
 function startMotion(cameraId) {
   const peer = peers.get(cameraId);
   const video = document.querySelector(`#card-${cameraId} .cam-video`);
   if (!peer || !video || peer.motion) return;
+
+  // Request notification permission lazily on first motion enable
+  if ('Notification' in window && Notification.permission === 'default') {
+    Notification.requestPermission().then(p => { motionNotifEnabled = p === 'granted'; });
+  } else {
+    motionNotifEnabled = Notification.permission === 'granted';
+  }
 
   const canvas = document.createElement('canvas');
   canvas.style.display = 'none';
@@ -424,7 +472,7 @@ function startMotion(cameraId) {
       if (changed / (W * H) > fraction) {
         showMotionAlert(cameraId);
         clearTimeout(alertTimeout);
-        alertTimeout = setTimeout(() => hideMotionAlert(cameraId), 2000);
+        alertTimeout = setTimeout(() => hideMotionAlert(cameraId), 3000);
       }
     }
     prev = frame.slice();
@@ -450,14 +498,28 @@ function showMotionAlert(cameraId) {
   if (!al) {
     al = document.createElement('div');
     al.className = 'motion-alert';
-    al.textContent = '⚠ Motion Detected';
+    al.textContent = '⚠ Motion';
     card.appendChild(al);
   }
-  al.classList.remove('hidden');
+  if (!al.classList.contains('visible')) {
+    al.classList.add('visible');
+    const peer = peers.get(cameraId);
+    // Browser notification (only when page is hidden or user opted in)
+    if (motionNotifEnabled) {
+      new Notification(`Motion – ${peer?.name || cameraId}`, {
+        body: new Date().toLocaleTimeString(),
+        icon: '/icons/icon-192.png',
+        tag: `motion-${cameraId}`,
+        silent: false,
+      });
+    }
+    // Auto-snapshot if enabled
+    if (motionAutoSnap) takeSnapshot(cameraId);
+  }
 }
 
 function hideMotionAlert(cameraId) {
-  document.querySelector(`#card-${cameraId} .motion-alert`)?.classList.add('hidden');
+  document.querySelector(`#card-${cameraId} .motion-alert`)?.classList.remove('visible');
 }
 
 // ── Rename ─────────────────────────────────────────────────────
@@ -540,6 +602,11 @@ document.getElementById('mirrorToggle').addEventListener('click', function() {
   mirrorFront = !mirrorFront;
   this.classList.toggle('on', mirrorFront);
   peers.forEach((_, id) => applyMirror(id));
+});
+
+document.getElementById('motionAutoSnapToggle').addEventListener('click', function() {
+  motionAutoSnap = !motionAutoSnap;
+  this.classList.toggle('on', motionAutoSnap);
 });
 
 document.getElementById('motionSensSeg').addEventListener('click', (e) => {

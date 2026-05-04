@@ -108,6 +108,10 @@
       </div>
     </div>
     <div class="panel-row">
+      <span class="panel-label">Auto-snapshot on motion</span>
+      <button class="toggle" id="motionAutoSnapToggle" aria-label="Auto-snapshot on motion"></button>
+    </div>
+    <div class="panel-row">
       <span class="panel-label">Mute all audio</span>
       <button class="toggle" id="muteAllToggle" aria-label="Mute all"></button>
     </div>
@@ -122,8 +126,7 @@
 <div class="panel hidden" id="renamePanel">
   <div class="panel-backdrop" data-close="renamePanel"></div>
   <div class="panel-sheet">
-    <div class="panel-handle"></div>
-    <div class="panel-title">Rename Camera</div>
+    <div class="panel-header"><span class="panel-title">Rename Camera</span><button class="panel-close" data-close="renamePanel">✕</button></div>
     <input type="text" id="renameInput" placeholder="Camera name" maxlength="30" style="margin-bottom:14px;">
     <button class="btn btn-primary" id="renameConfirmBtn" style="width:100%;">Save</button>
   </div>
