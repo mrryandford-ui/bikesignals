@@ -213,7 +213,7 @@ function onCameraStatus({ cameraId, facingMode, muted, torch, quality: q }) {
   if (q !== undefined) {
     peer.quality = q;
     const btn = document.querySelector(`#card-${cameraId} [data-action="quality"]`);
-    if (btn) btn.title = `Quality: ${q}p (tap to cycle)`;
+    if (btn) btn.title = `Quality: ${q}p`;
   }
 }
 
@@ -282,7 +282,7 @@ function addCameraCard(cameraId, name) {
       <button class="icon-btn" data-action="flip"        title="Flip camera (remote)">🔄</button>
       <button class="icon-btn" data-action="flash"       title="Toggle flash (remote)">🔦</button>
       <button class="icon-btn" data-action="stealth"     title="Stealth mode (remote)">🕵️</button>
-      <button class="icon-btn" data-action="quality"     title="Quality: 720p (tap to cycle)">🎞️</button>
+      <button class="icon-btn" data-action="quality"     title="Quality: 720p">🎞️</button>
       <button class="icon-btn" data-action="rename"      title="Rename">✏️</button>
       <button class="icon-btn danger" data-action="disconnect" title="Disconnect">✕</button>
     </div>
@@ -306,7 +306,7 @@ function addCameraCard(cameraId, name) {
   toggleEmptyState();
 }
 
-function handleCardAction(cameraId, action, btn) {
+async function handleCardAction(cameraId, action, btn) {
   const peer = peers.get(cameraId);
   const video = document.querySelector(`#card-${cameraId} .cam-video`);
   if (!peer) return;
@@ -370,11 +370,12 @@ function handleCardAction(cameraId, action, btn) {
     case 'quality': {
       const quals = [240, 480, 720, 1080];
       const cur = peer.quality || 720;
-      const next = quals[(quals.indexOf(cur) + 1) % quals.length];
-      peer.quality = next;
-      wsSend({ type: 'camera-command', cameraId, command: 'quality', value: next });
-      btn.title = `Quality: ${next}p (tap to cycle)`;
-      showToast(`${peer.name} → ${next}p`);
+      const chosen = await showQualityPicker(quals, cur);
+      if (chosen === null) break;
+      peer.quality = chosen;
+      wsSend({ type: 'camera-command', cameraId, command: 'quality', value: chosen });
+      btn.title = `Quality: ${chosen}p`;
+      showToast(`${peer.name} → ${chosen}p`);
       break;
     }
 
@@ -702,6 +703,35 @@ function showToast(msg) {
   t.style.opacity = '1';
   clearTimeout(t._hide);
   t._hide = setTimeout(() => t.style.opacity = '0', 2000);
+}
+
+// ── Quality picker ─────────────────────────────────────────────
+function showQualityPicker(quals, current) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:9998;display:flex;align-items:center;justify-content:center';
+    const box = document.createElement('div');
+    box.style.cssText = 'background:#1e293b;border:1.5px solid #334155;border-radius:16px;padding:20px;min-width:220px;display:flex;flex-direction:column;gap:10px';
+    const title = document.createElement('div');
+    title.textContent = 'Select Quality';
+    title.style.cssText = 'color:#94a3b8;font-size:13px;font-weight:600;text-align:center;margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px';
+    box.appendChild(title);
+    for (const q of quals) {
+      const btn = document.createElement('button');
+      btn.textContent = q === current ? `${q}p ✓` : `${q}p`;
+      btn.style.cssText = `padding:12px;border:1.5px solid ${q === current ? '#3b82f6' : '#334155'};border-radius:10px;background:${q === current ? 'rgba(59,130,246,0.15)' : 'transparent'};color:#f1f5f9;font-size:16px;font-weight:${q === current ? '700' : '400'};cursor:pointer;-webkit-tap-highlight-color:transparent`;
+      btn.addEventListener('click', () => { document.body.removeChild(overlay); resolve(q); });
+      box.appendChild(btn);
+    }
+    const cancel = document.createElement('button');
+    cancel.textContent = 'Cancel';
+    cancel.style.cssText = 'padding:10px;border:none;background:transparent;color:#64748b;font-size:14px;cursor:pointer;margin-top:2px';
+    cancel.addEventListener('click', () => { document.body.removeChild(overlay); resolve(null); });
+    box.appendChild(cancel);
+    overlay.appendChild(box);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) { document.body.removeChild(overlay); resolve(null); } });
+    document.body.appendChild(overlay);
+  });
 }
 
 // ── Latency ping ───────────────────────────────────────────────
