@@ -316,7 +316,7 @@ async function setTorch(on) {
     torchOn = on;
     document.getElementById('torchBtn').classList.toggle('active', on);
   } catch {
-    showToast('Torch not available on this device');
+    showToast('Flash not available on this device');
   }
 }
 

@@ -189,6 +189,17 @@ function onCameraStatus({ cameraId, facingMode, muted, torch, quality: q }) {
   if (facingMode !== undefined) {
     peer.facingMode = facingMode;
     applyMirror(cameraId);
+    const flashBtn = document.querySelector(`#card-${cameraId} [data-action="flash"]`);
+    if (flashBtn) {
+      const isFront = facingMode === 'user';
+      flashBtn.disabled = isFront;
+      flashBtn.style.opacity = isFront ? '0.3' : '';
+      flashBtn.title = isFront ? 'Flash unavailable on front camera' : 'Toggle flash';
+      if (isFront && peer.torchOn) {
+        peer.torchOn = false;
+        flashBtn.classList.remove('active');
+      }
+    }
   }
   if (muted !== undefined) {
     const btn = document.querySelector(`#card-${cameraId} [data-action="mute"]`);
@@ -341,9 +352,11 @@ function handleCardAction(cameraId, action, btn) {
       break;
 
     case 'flash': {
+      if (peer.facingMode === 'user') break; // front camera has no flash
       peer.torchOn = !peer.torchOn;
       wsSend({ type: 'camera-command', cameraId, command: 'torch-toggle' });
       btn.classList.toggle('active', peer.torchOn);
+      showToast(peer.torchOn ? '🔦 Flash on' : '🔦 Flash off');
       break;
     }
 
