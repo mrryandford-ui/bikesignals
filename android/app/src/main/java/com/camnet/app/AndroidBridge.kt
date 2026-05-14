@@ -165,6 +165,38 @@ class AndroidBridge(
     }
 
     /**
+     * Called from camera.js saveCameraRecording(). Decodes the base64 video data URL
+     * and saves it to DCIM/CamNet in the device gallery via MediaStore.
+     */
+    @JavascriptInterface
+    fun saveVideo(dataUrl: String, filename: String) {
+        try {
+            val bytes = android.util.Base64.decode(
+                dataUrl.substringAfter(","), android.util.Base64.DEFAULT
+            )
+            val mimeType = if (filename.endsWith(".mp4")) "video/mp4" else "video/webm"
+            val values = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.Video.Media.DISPLAY_NAME, filename)
+                put(android.provider.MediaStore.Video.Media.MIME_TYPE, mimeType)
+                put(android.provider.MediaStore.Video.Media.RELATIVE_PATH, "DCIM/CamNet")
+            }
+            val uri = context.contentResolver.insert(
+                android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values
+            )
+            uri?.let { context.contentResolver.openOutputStream(it)?.use { s -> s.write(bytes) } }
+                ?: throw Exception("MediaStore insert returned null")
+            (context as? MainActivity)?.runOnUiThread {
+                android.widget.Toast.makeText(context, "Video saved to gallery", android.widget.Toast.LENGTH_SHORT).show()
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("CamNet", "saveVideo failed: $e")
+            (context as? MainActivity)?.runOnUiThread {
+                android.widget.Toast.makeText(context, "Could not save video", android.widget.Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    /**
      * Called from viewer.js takeSnapshot(). Decodes the JPEG data URL and saves
      * it to DCIM/CamNet in the device gallery via MediaStore.
      */

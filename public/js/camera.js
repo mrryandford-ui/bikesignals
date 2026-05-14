@@ -27,6 +27,8 @@ let torchOn    = false;
 let quality    = 720;
 let wakeLock   = null;
 let wsOpen     = false;
+let recorder   = null;
+let recordChunks = [];
 
 // ── Pre-fill room code from URL param ──────────────────────────
 const params = new URLSearchParams(location.search);
@@ -265,10 +267,66 @@ async function handleCommand({ command, value }) {
         }
       }
       break;
+    case 'record-start':
+      startCameraRecording();
+      break;
+    case 'record-stop':
+      stopCameraRecording();
+      break;
     case 'disconnect':
       hangup();
       break;
   }
+}
+
+// ── Local recording ────────────────────────────────────────────
+function startCameraRecording() {
+  if (recorder && recorder.state !== 'inactive') return;
+  if (!localStream) return;
+  const mimeType = ['video/webm;codecs=vp8,opus', 'video/webm;codecs=vp8', 'video/webm']
+    .find(t => MediaRecorder.isTypeSupported(t)) || '';
+  recordChunks = [];
+  try {
+    recorder = new MediaRecorder(localStream, mimeType ? { mimeType } : {});
+    recorder.ondataavailable = e => { if (e.data.size > 0) recordChunks.push(e.data); };
+    recorder.onstop = saveCameraRecording;
+    recorder.start();
+    showToast('Recording started');
+    sendStatus();
+  } catch (e) {
+    recorder = null;
+    showToast('Recording not supported on this device');
+  }
+}
+
+function stopCameraRecording() {
+  if (recorder && recorder.state !== 'inactive') recorder.stop();
+  else { recorder = null; sendStatus(); }
+}
+
+async function saveCameraRecording() {
+  if (!recordChunks.length) { recorder = null; sendStatus(); return; }
+  const mimeType = recorder?.mimeType || 'video/webm';
+  const blob = new Blob(recordChunks, { type: mimeType });
+  const ext  = mimeType.includes('mp4') ? 'mp4' : 'webm';
+  const name = (cameraName || 'Cam').replace(/[^a-zA-Z0-9]/g, '_');
+  const ts   = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const filename = `CamNet_${name}_${ts}.${ext}`;
+  recordChunks = [];
+  recorder = null;
+
+  if (window.AndroidBridge) {
+    const reader = new FileReader();
+    reader.onloadend = () => window.AndroidBridge.saveVideo(reader.result, filename);
+    reader.readAsDataURL(blob);
+  } else {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+    showToast('Video downloaded');
+  }
+  sendStatus();
 }
 
 // ── Camera flip ────────────────────────────────────────────────
@@ -385,6 +443,7 @@ function sendStatus() {
     muted: !micEnabled,
     torch: torchOn,
     quality,
+    recording: !!(recorder && recorder.state === 'recording'),
   });
 }
 

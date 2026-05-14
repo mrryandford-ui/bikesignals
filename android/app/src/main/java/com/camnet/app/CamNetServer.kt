@@ -30,7 +30,7 @@ import java.util.concurrent.ConcurrentHashMap
  * HTTPS for LAN camera phones is handled by [SslProxy] which terminates TLS
  * and forwards raw TCP to this server — avoids Ktor's TLS stack entirely.
  */
-class CamNetServer(port: Int, private val assets: AssetManager) {
+class CamNetServer(port: Int, private val assets: AssetManager, private val context: android.content.Context) {
 
     // ── Room state ────────────────────────────────────────────────
     private class Room {
@@ -66,10 +66,11 @@ class CamNetServer(port: Int, private val assets: AssetManager) {
             timeout    = Duration.ofSeconds(60)
         }
         routing {
-            webSocket("/")    { handleSocket(this) }
-            get("/api/info")  { serveApiInfo(call) }
-            get("/")          { serveAsset(call) }
-            get("/{path...}") { serveAsset(call) }
+            webSocket("/")         { handleSocket(this) }
+            get("/api/info")       { serveApiInfo(call) }
+            post("/api/save-video"){ saveVideoToGallery(call) }
+            get("/")               { serveAsset(call) }
+            get("/{path...}")      { serveAsset(call) }
         }
     }
 
@@ -218,6 +219,32 @@ class CamNetServer(port: Int, private val assets: AssetManager) {
         val arr   = ips.joinToString(",") { """{"address":"$it","family":"IPv4","internal":false}""" }
         val json  = """{"lanIP":${if (first != null) "\"$first\"" else "null"},"allIPs":[$arr],"sslPort":$SSL_PORT}"""
         call.respondText(json, ContentType.Application.Json)
+    }
+
+    private suspend fun saveVideoToGallery(call: ApplicationCall) {
+        try {
+            val rawName = call.request.header("X-Filename")
+                ?.let { java.net.URLDecoder.decode(it, "UTF-8") }
+                ?: "CamNet_${System.currentTimeMillis()}.webm"
+            val mimeType = call.request.contentType().let {
+                if (it == ContentType.Any) "video/webm" else it.toString().substringBefore(';').trim()
+            }
+            val bytes = call.receive<ByteArray>()
+            val values = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.Video.Media.DISPLAY_NAME, rawName)
+                put(android.provider.MediaStore.Video.Media.MIME_TYPE, mimeType)
+                put(android.provider.MediaStore.Video.Media.RELATIVE_PATH, "DCIM/CamNet")
+            }
+            val uri = context.contentResolver.insert(
+                android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values
+            ) ?: throw Exception("MediaStore insert returned null")
+            context.contentResolver.openOutputStream(uri)?.use { it.write(bytes) }
+            call.respondText("""{"ok":true}""", ContentType.Application.Json)
+        } catch (e: Exception) {
+            android.util.Log.e("CamNet", "saveVideoToGallery failed: $e")
+            call.respondText("""{"ok":false,"error":${org.json.JSONObject.quote(e.message ?: "unknown")}}""",
+                ContentType.Application.Json, HttpStatusCode.InternalServerError)
+        }
     }
 
     private suspend fun serveAsset(call: ApplicationCall) {

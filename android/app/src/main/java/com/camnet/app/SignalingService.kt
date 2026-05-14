@@ -51,7 +51,7 @@ class SignalingService : Service() {
 
         if (server?.isAlive != true) {
             try {
-                server = CamNetServer(PORT, assets).also { it.start() }
+                server = CamNetServer(PORT, assets, this@SignalingService).also { it.start() }
                 Log.i(TAG, "Signaling server started on port $PORT")
             } catch (t: Throwable) {
                 Log.e(TAG, "Failed to start signaling server: $t")

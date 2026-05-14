@@ -126,7 +126,7 @@ function onCameraJoined(cameraId, name) {
     if (pc.iceConnectionState === 'failed') pc.restartIce();
   };
 
-  peers.set(cameraId, { pc, name, stream: null, recorder: null, motion: null, facingMode: null, torchOn: false, quality: 720 });
+  peers.set(cameraId, { pc, name, stream: null, recorder: null, motion: null, facingMode: null, torchOn: false, quality: 720, recordTarget: null, recAutoStop: null });
   addCameraCard(cameraId, name);
   updateCamCount();
 }
@@ -341,8 +341,15 @@ async function handleCardAction(cameraId, action, btn) {
       break;
 
     case 'record':
-      if (peer.recorder) { stopRecording(cameraId); btn.textContent = '⏺'; btn.classList.remove('active'); }
-      else               { startRecording(cameraId); btn.textContent = '⏹'; btn.classList.add('active'); }
+      if (peer.recorder || peer.recordTarget) {
+        stopRecording(cameraId);
+        btn.textContent = '⏺'; btn.classList.remove('active');
+      } else {
+        const target = await showRecordingTargetPicker();
+        if (!target) break;
+        await startRecording(cameraId, target);
+        btn.textContent = '⏹'; btn.classList.add('active');
+      }
       break;
 
     case 'flip':
@@ -440,38 +447,110 @@ function takeSnapshot(cameraId) {
 }
 
 // ── Recording ──────────────────────────────────────────────────
-function startRecording(cameraId) {
+async function startRecording(cameraId, target) {
   const peer = peers.get(cameraId);
-  if (!peer?.stream) return;
-  const mimeType = ['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm','video/mp4']
-    .find(m => MediaRecorder.isTypeSupported(m)) || '';
-  try {
+  if (!peer) return;
+  peer.recordTarget = target;
+  showRecIndicator(cameraId, true);
+
+  // Auto-stop at 5 minutes to keep file sizes manageable
+  peer.recAutoStop = setTimeout(() => {
+    showToast('Recording auto-stopped (5 min limit)');
+    stopRecording(cameraId);
+    const b = document.querySelector(`#card-${cameraId} [data-action="record"]`);
+    if (b) { b.textContent = '⏺'; b.classList.remove('active'); }
+  }, 5 * 60 * 1000);
+
+  if (target === 'camera' || target === 'both') {
+    wsSend({ type: 'camera-command', cameraId, command: 'record-start' });
+  }
+
+  if (target === 'monitor' || target === 'both') {
+    if (!peer.stream) { showToast('No stream to record'); return; }
+    const mimeType = ['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm','video/mp4']
+      .find(m => MediaRecorder.isTypeSupported(m)) || '';
     const chunks = [];
-    const rec = new MediaRecorder(peer.stream, mimeType ? { mimeType } : {});
-    rec.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
-    rec.onstop = () => {
-      const blob = new Blob(chunks, { type: rec.mimeType });
-      const url  = URL.createObjectURL(blob);
-      const a    = document.createElement('a');
-      a.href     = url;
-      a.download = `camnet-${(peer.name || cameraId).replace(/\s+/g,'-')}-${Date.now()}.webm`;
-      a.click();
-      URL.revokeObjectURL(url);
-    };
-    rec.start(1000);
-    peer.recorder = rec;
-    showRecIndicator(cameraId, true);
-  } catch (e) {
-    console.warn('Recording failed:', e);
+    try {
+      const rec = new MediaRecorder(peer.stream, mimeType ? { mimeType } : {});
+      rec.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+      rec.onstop = () => saveMonitorRecording(cameraId, new Blob(chunks, { type: rec.mimeType }), rec.mimeType);
+      rec.start(1000);
+      peer.recorder = rec;
+    } catch (e) {
+      showToast('Monitor recording failed');
+      console.warn('Monitor recording failed:', e);
+    }
   }
 }
 
 function stopRecording(cameraId) {
   const peer = peers.get(cameraId);
-  if (!peer?.recorder) return;
-  peer.recorder.stop();
-  peer.recorder = null;
+  if (!peer) return;
+  clearTimeout(peer.recAutoStop);
+  peer.recAutoStop = null;
+  const target = peer.recordTarget;
+  peer.recordTarget = null;
+  if (peer.recorder) { peer.recorder.stop(); peer.recorder = null; }
+  if (target === 'camera' || target === 'both') {
+    wsSend({ type: 'camera-command', cameraId, command: 'record-stop' });
+  }
   showRecIndicator(cameraId, false);
+}
+
+async function saveMonitorRecording(cameraId, blob, mimeType) {
+  const peer = peers.get(cameraId);
+  const name = (peer?.name || cameraId).replace(/[^a-zA-Z0-9]/g, '_');
+  const ts   = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const ext  = (mimeType || '').includes('mp4') ? 'mp4' : 'webm';
+  const filename = `CamNet_${name}_${ts}.${ext}`;
+  try {
+    const res = await fetch('/api/save-video', {
+      method: 'POST',
+      headers: { 'Content-Type': mimeType || 'video/webm', 'X-Filename': encodeURIComponent(filename) },
+      body: await blob.arrayBuffer(),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    showToast('📹 Video saved to gallery');
+  } catch {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+    showToast('📹 Video downloaded');
+  }
+}
+
+function showRecordingTargetPicker() {
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:9998;display:flex;align-items:center;justify-content:center';
+    const box = document.createElement('div');
+    box.style.cssText = 'background:#1e293b;border:1.5px solid #334155;border-radius:16px;padding:20px;min-width:240px;display:flex;flex-direction:column;gap:10px';
+    const title = document.createElement('div');
+    title.textContent = 'Save Recording On';
+    title.style.cssText = 'color:#94a3b8;font-size:13px;font-weight:600;text-align:center;margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px';
+    box.appendChild(title);
+    const options = [
+      { value: 'camera',  label: '📱 Camera Phone',   desc: 'Save on the camera device' },
+      { value: 'monitor', label: '🖥️ Monitor (here)',  desc: 'Save on this phone'        },
+      { value: 'both',    label: '📱🖥️ Both',           desc: 'Save on both devices'     },
+    ];
+    for (const opt of options) {
+      const btn = document.createElement('button');
+      btn.innerHTML = `<div style="font-size:15px;font-weight:600">${opt.label}</div><div style="font-size:12px;color:#64748b;margin-top:2px">${opt.desc}</div>`;
+      btn.style.cssText = 'padding:12px 16px;border:1.5px solid #334155;border-radius:10px;background:transparent;color:#f1f5f9;cursor:pointer;text-align:left;-webkit-tap-highlight-color:transparent';
+      btn.addEventListener('click', () => { document.body.removeChild(overlay); resolve(opt.value); });
+      box.appendChild(btn);
+    }
+    const cancel = document.createElement('button');
+    cancel.textContent = 'Cancel';
+    cancel.style.cssText = 'padding:10px;border:none;background:transparent;color:#64748b;font-size:14px;cursor:pointer;margin-top:2px';
+    cancel.addEventListener('click', () => { document.body.removeChild(overlay); resolve(null); });
+    box.appendChild(cancel);
+    overlay.appendChild(box);
+    overlay.addEventListener('click', e => { if (e.target === overlay) { document.body.removeChild(overlay); resolve(null); } });
+    document.body.appendChild(overlay);
+  });
 }
 
 function showRecIndicator(cameraId, show) {
