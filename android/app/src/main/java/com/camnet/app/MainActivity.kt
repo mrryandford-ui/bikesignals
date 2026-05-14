@@ -77,7 +77,7 @@ class MainActivity : AppCompatActivity() {
     private fun homeHtml(): String {
         val serverRunning = SignalingService.isRunning()
         val localCameraBtn = if (serverRunning) """
-            <button class="btn secondary" onclick="AndroidBridge.startLocalCamera()">📷 Camera (this phone)</button>
+            <button class="btn secondary" onclick="AndroidBridge.startLocalCamera()">📷&nbsp; Camera (also this phone)</button>
         """ else ""
         return """
         <!DOCTYPE html><html><head>
@@ -101,10 +101,10 @@ class MainActivity : AppCompatActivity() {
         <h1>CamNet</h1>
         <p class="tagline">Multi-phone security camera</p>
         <button class="btn primary"   onclick="AndroidBridge.startMonitor()">🖥&nbsp; Monitor</button>
-        <button class="btn secondary" onclick="AndroidBridge.showCameraSetup()">📷&nbsp; Camera (other phone)</button>
+        <button class="btn secondary" onclick="AndroidBridge.showCameraSetup()">📷&nbsp; Camera</button>
         $localCameraBtn
         <hr class="divider">
-        <p class="hint">Monitor: start the server &amp; watch feeds<br>Camera: stream to a Monitor phone</p>
+        <p class="hint">Monitor: start the server &amp; watch feeds<br>Camera: stream this phone to a Monitor</p>
         </body></html>
         """.trimIndent()
     }
