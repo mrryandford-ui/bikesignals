@@ -281,7 +281,7 @@ function addCameraCard(cameraId, name) {
       <button class="icon-btn" data-action="motion"      title="Motion detect">👁</button>
       <button class="icon-btn" data-action="flip"        title="Flip camera (remote)">🔄</button>
       <button class="icon-btn" data-action="flash"       title="Toggle flash (remote)">🔦</button>
-      <button class="icon-btn" data-action="stealth"     title="Stealth mode (remote)">🌑</button>
+      <button class="icon-btn" data-action="stealth"     title="Stealth mode (remote)">🕵️</button>
       <button class="icon-btn" data-action="quality"     title="Quality: 720p (tap to cycle)">🎞️</button>
       <button class="icon-btn" data-action="rename"      title="Rename">✏️</button>
       <button class="icon-btn danger" data-action="disconnect" title="Disconnect">✕</button>
