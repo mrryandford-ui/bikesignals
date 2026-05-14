@@ -163,4 +163,35 @@ class AndroidBridge(
             onLoadUrl("http://localhost:${SignalingService.PORT}/camera.html")
         }
     }
+
+    /**
+     * Called from viewer.js takeSnapshot(). Decodes the JPEG data URL and saves
+     * it to DCIM/CamNet in the device gallery via MediaStore.
+     */
+    @JavascriptInterface
+    fun saveSnapshot(dataUrl: String, filename: String) {
+        try {
+            val bytes = android.util.Base64.decode(
+                dataUrl.substringAfter(","), android.util.Base64.DEFAULT
+            )
+            val values = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, filename)
+                put(android.provider.MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+                put(android.provider.MediaStore.Images.Media.RELATIVE_PATH, "DCIM/CamNet")
+            }
+            val uri = context.contentResolver.insert(
+                android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values
+            )
+            uri?.let { context.contentResolver.openOutputStream(it)?.use { s -> s.write(bytes) } }
+                ?: throw Exception("MediaStore insert returned null")
+            (context as? MainActivity)?.runOnUiThread {
+                android.widget.Toast.makeText(context, "Photo saved to gallery", android.widget.Toast.LENGTH_SHORT).show()
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("CamNet", "saveSnapshot failed: $e")
+            (context as? MainActivity)?.runOnUiThread {
+                android.widget.Toast.makeText(context, "Could not save photo", android.widget.Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
 }

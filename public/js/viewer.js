@@ -388,11 +388,29 @@ function takeSnapshot(cameraId) {
     ctx.scale(-1, 1);
   }
   ctx.drawImage(video, 0, 0);
-  const peer = peers.get(cameraId);
-  const link = document.createElement('a');
-  link.href = canvas.toDataURL('image/jpeg', 0.92);
-  link.download = `snapshot-${(peer?.name || cameraId).replace(/\s+/g,'-')}-${Date.now()}.jpg`;
-  link.click();
+
+  const peer     = peers.get(cameraId);
+  const name     = (peer?.name || cameraId).replace(/\s+/g, '-');
+  const filename = `camnet-${name}-${Date.now()}.jpg`;
+  const dataUrl  = canvas.toDataURL('image/jpeg', 0.92);
+
+  // Shutter flash
+  const card  = document.getElementById(`card-${cameraId}`);
+  const flash = Object.assign(document.createElement('div'), {
+    style: 'position:absolute;inset:0;background:#fff;opacity:0.75;pointer-events:none;' +
+           'z-index:20;border-radius:inherit;transition:opacity 0.35s ease-out'
+  });
+  card.appendChild(flash);
+  requestAnimationFrame(() => requestAnimationFrame(() => { flash.style.opacity = '0'; }));
+  setTimeout(() => flash.remove(), 400);
+
+  // Save via Android bridge (writes to DCIM/CamNet and shows a toast)
+  if (typeof AndroidBridge !== 'undefined' && AndroidBridge.saveSnapshot) {
+    AndroidBridge.saveSnapshot(dataUrl, filename);
+  } else {
+    // Browser fallback
+    Object.assign(document.createElement('a'), { href: dataUrl, download: filename }).click();
+  }
 }
 
 // ── Recording ──────────────────────────────────────────────────
