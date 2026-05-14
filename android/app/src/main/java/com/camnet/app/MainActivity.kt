@@ -210,8 +210,17 @@ class MainActivity : AppCompatActivity() {
                 try {
                   var codes = await detector.detect(video);
                   if(codes.length > 0){
+                    var raw = codes[0].rawValue;
                     stopScan();
-                    AndroidBridge.openCameraFromQR(codes[0].rawValue);
+                    // Always populate the IP field so the user sees something
+                    try {
+                      var u = new URL(raw);
+                      document.getElementById('ip').value = u.hostname;
+                    } catch(e2) {
+                      document.getElementById('ip').value = raw;
+                    }
+                    // Attempt auto-connect via the bridge
+                    AndroidBridge.openCameraFromQR(raw);
                   }
                 } catch(e){}
               }, 250);

@@ -82,9 +82,9 @@ async function onMessage(msg) {
 function onRoomCreated(id) {
   roomId = id;
   sessionStorage.setItem('camnet_room', id);
-  const port = location.port ? `:${location.port}` : '';
-  const ip   = window._lanIP;
-  const base = ip ? `${location.protocol}//${ip}${port}` : location.origin;
+  const ip      = window._lanIP;
+  const sslPort = window._sslPort || 3443;
+  const base    = ip ? `https://${ip}:${sslPort}` : location.origin;
   joinURL = `${base}/?room=${id}`;
 
   document.getElementById('roomCode').textContent = id;
@@ -682,7 +682,8 @@ function escHtml(s) {
 fetch('/api/info')
   .then(r => r.json())
   .then(d => {
-    const port = location.port ? `:${location.port}` : '';
+    // Camera phones connect via the SSL proxy, not the viewer's own HTTP port.
+    const sslPort = d.sslPort || 3443;
     const box  = document.getElementById('serverUrlBox');
     const disp = document.getElementById('serverUrlDisplay');
 
@@ -696,9 +697,10 @@ fetch('/api/info')
       disp.style.color = 'var(--accent-r)';
       box.style.display = 'block';
     } else {
-      window._lanIP = ips[0];
+      window._lanIP    = ips[0];
+      window._sslPort  = sslPort;
       disp.innerHTML = ips.map((ip, i) => {
-        const url = `${location.protocol}//${ip}${port}`;
+        const url = `https://${ip}:${sslPort}`;
         const label = i === 0 ? '✓ ' : '  ';
         return `<div style="padding:3px 0;cursor:pointer" data-url="${url}">${label}${url}</div>`;
       }).join('');

@@ -45,13 +45,19 @@ class AndroidBridge(
      * Called from the QR scanner in the setup screen.
      * Parses the full join URL (https://IP:3443/?room=ABCDEF), saves the base
      * URL, and loads camera.html with the room code pre-filled via ?room=.
+     * Normalises http→https and port 3000→3443 so old or mis-encoded QRs still work.
      */
     @JavascriptInterface
     fun openCameraFromQR(scannedUrl: String) {
         try {
             val uri = android.net.Uri.parse(scannedUrl.trim())
-            val port = if (uri.port != -1) ":${uri.port}" else ""
-            val base = "${uri.scheme}://${uri.host}$port"
+            // Cameras must use the SSL proxy; normalise if QR was encoded with the plain HTTP port
+            val scheme = "https"
+            val rawPort = uri.port
+            val port = if (rawPort == SignalingService.PORT) CamNetServer.SSL_PORT
+                       else if (rawPort != -1) rawPort
+                       else CamNetServer.SSL_PORT
+            val base = "$scheme://${uri.host}:$port"
             val room = uri.getQueryParameter("room") ?: ""
             context.getSharedPreferences("camnet", Context.MODE_PRIVATE)
                 .edit().putString("server_url", base).apply()
