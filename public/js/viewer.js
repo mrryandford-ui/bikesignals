@@ -25,6 +25,7 @@ const SENS = {
   mid:  { pixelDiff: 25, fraction: 0.025 },
   high: { pixelDiff: 15, fraction: 0.01 },
 };
+const MOTION_COOLDOWN_MS = 15_000; // min ms between alerts per camera
 
 // ── WebSocket ──────────────────────────────────────────────────
 function connectWS() {
@@ -126,7 +127,7 @@ function onCameraJoined(cameraId, name) {
     if (pc.iceConnectionState === 'failed') pc.restartIce();
   };
 
-  peers.set(cameraId, { pc, name, stream: null, recorder: null, motion: null, facingMode: null, torchOn: false, quality: 720, recordTarget: null, recDurationMs: 0, recStartTime: 0, recSegNum: 0, recBaseName: '', recChunks: [], recSegTimer: null, recDurationTimer: null });
+  peers.set(cameraId, { pc, name, stream: null, recorder: null, motion: null, facingMode: null, torchOn: false, quality: 720, recordTarget: null, recDurationMs: 0, recStartTime: 0, recSegNum: 0, recBaseName: '', recChunks: [], recSegTimer: null, recDurationTimer: null, zone: null, lastMotionAt: 0 });
   addCameraCard(cameraId, name);
   updateCamCount();
 }
@@ -279,6 +280,7 @@ function addCameraCard(cameraId, name) {
       <button class="icon-btn" data-action="mute"        title="Mute">🔊</button>
       <button class="icon-btn" data-action="nightvision" title="Night vision">🌙</button>
       <button class="icon-btn" data-action="motion"      title="Motion detect">👁</button>
+      <button class="icon-btn" data-action="zone"        title="Detection zone">🎯</button>
       <button class="icon-btn" data-action="flip"        title="Flip camera (remote)">🔄</button>
       <button class="icon-btn" data-action="flash"       title="Toggle flash (remote)">🔦</button>
       <button class="icon-btn" data-action="stealth"     title="Stealth mode (remote)">🕵️</button>
@@ -338,6 +340,10 @@ async function handleCardAction(cameraId, action, btn) {
     case 'motion':
       if (peer.motion) { stopMotion(cameraId); btn.classList.remove('active'); }
       else              { startMotion(cameraId); btn.classList.add('active'); }
+      break;
+
+    case 'zone':
+      openZoneEditor(cameraId);
       break;
 
     case 'record':
@@ -708,7 +714,6 @@ function startMotion(cameraId) {
   const video = document.querySelector(`#card-${cameraId} .cam-video`);
   if (!peer || !video || peer.motion) return;
 
-  // Request notification permission lazily on first motion enable
   if ('Notification' in window && Notification.permission === 'default') {
     Notification.requestPermission().then(p => { motionNotifEnabled = p === 'granted'; });
   } else {
@@ -733,19 +738,40 @@ function startMotion(cameraId) {
 
     if (prev) {
       const { pixelDiff, fraction } = SENS[motionSens];
-      let changed = 0;
-      for (let i = 0; i < frame.length; i += 4) {
-        const d = (Math.abs(frame[i]-prev[i]) + Math.abs(frame[i+1]-prev[i+1]) + Math.abs(frame[i+2]-prev[i+2])) / 3;
-        if (d > pixelDiff) changed++;
+      const zone = peer.zone;
+      let changed = 0, total = 0;
+
+      if (zone) {
+        // Only diff pixels inside the drawn zone
+        const x0 = Math.max(0, Math.floor(zone.x * W));
+        const y0 = Math.max(0, Math.floor(zone.y * H));
+        const x1 = Math.min(W, Math.ceil((zone.x + zone.w) * W));
+        const y1 = Math.min(H, Math.ceil((zone.y + zone.h) * H));
+        for (let y = y0; y < y1; y++) {
+          for (let x = x0; x < x1; x++) {
+            const i = (y * W + x) * 4;
+            const d = (Math.abs(frame[i]-prev[i]) + Math.abs(frame[i+1]-prev[i+1]) + Math.abs(frame[i+2]-prev[i+2])) / 3;
+            if (d > pixelDiff) changed++;
+            total++;
+          }
+        }
+      } else {
+        total = W * H;
+        for (let i = 0; i < frame.length; i += 4) {
+          const d = (Math.abs(frame[i]-prev[i]) + Math.abs(frame[i+1]-prev[i+1]) + Math.abs(frame[i+2]-prev[i+2])) / 3;
+          if (d > pixelDiff) changed++;
+        }
       }
-      if (changed / (W * H) > fraction) {
+
+      const now = Date.now();
+      if (total > 0 && changed / total > fraction && now >= peer.lastMotionAt + MOTION_COOLDOWN_MS) {
         showMotionAlert(cameraId);
         clearTimeout(alertTimeout);
-        alertTimeout = setTimeout(() => hideMotionAlert(cameraId), 3000);
+        alertTimeout = setTimeout(() => hideMotionAlert(cameraId), 4000);
       }
     }
     prev = frame.slice();
-    setTimeout(analyze, 400); // ~2.5 fps analysis
+    setTimeout(analyze, 400);
   }
 
   peer.motion = { stop: () => { running = false; canvas.remove(); clearTimeout(alertTimeout); } };
@@ -761,34 +787,181 @@ function stopMotion(cameraId) {
 }
 
 function showMotionAlert(cameraId) {
+  const peer = peers.get(cameraId);
   const card = document.getElementById(`card-${cameraId}`);
-  if (!card) return;
+  if (!peer || !card) return;
+
+  peer.lastMotionAt = Date.now();
+
   let al = card.querySelector('.motion-alert');
   if (!al) {
     al = document.createElement('div');
     al.className = 'motion-alert';
-    al.textContent = '⚠ Motion';
     card.appendChild(al);
   }
-  if (!al.classList.contains('visible')) {
-    al.classList.add('visible');
-    const peer = peers.get(cameraId);
-    // Browser notification (only when page is hidden or user opted in)
-    if (motionNotifEnabled) {
-      new Notification(`Motion – ${peer?.name || cameraId}`, {
-        body: new Date().toLocaleTimeString(),
-        icon: '/icons/icon-192.png',
-        tag: `motion-${cameraId}`,
-        silent: false,
-      });
-    }
-    // Auto-snapshot if enabled
-    if (motionAutoSnap) takeSnapshot(cameraId);
+  al.textContent = peer.zone ? '⚠ Motion in zone' : '⚠ Motion';
+  al.classList.add('visible');
+
+  if (motionNotifEnabled) {
+    new Notification(`Motion – ${peer.name || cameraId}`, {
+      body: new Date().toLocaleTimeString(),
+      icon: '/icons/icon-192.png',
+      tag: `motion-${cameraId}`,
+      silent: false,
+    });
   }
+  if (motionAutoSnap) takeSnapshot(cameraId);
 }
 
 function hideMotionAlert(cameraId) {
   document.querySelector(`#card-${cameraId} .motion-alert`)?.classList.remove('visible');
+}
+
+// ── Detection zone editor ──────────────────────────────────────
+function openZoneEditor(cameraId) {
+  const peer = peers.get(cameraId);
+  const card = document.getElementById(`card-${cameraId}`);
+  if (!peer || !card) return;
+  if (card.querySelector('.zone-editor')) return; // already open
+
+  const editor = document.createElement('div');
+  editor.className = 'zone-editor';
+  editor.style.cssText = 'position:absolute;inset:0;z-index:25;cursor:crosshair;touch-action:none;user-select:none';
+  editor.addEventListener('click', e => e.stopPropagation());
+
+  // Darkened backdrop
+  const backdrop = document.createElement('div');
+  backdrop.style.cssText = 'position:absolute;inset:0;background:rgba(0,0,0,0.45);pointer-events:none';
+  editor.appendChild(backdrop);
+
+  // Instruction
+  const hint = document.createElement('div');
+  hint.style.cssText = 'position:absolute;top:10px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.75);color:#f1f5f9;font-size:12px;font-weight:600;padding:5px 12px;border-radius:20px;pointer-events:none;white-space:nowrap;z-index:1';
+  hint.textContent = 'Drag to draw detection zone';
+  editor.appendChild(hint);
+
+  // Live zone rectangle
+  const zoneRect = document.createElement('div');
+  zoneRect.style.cssText = 'position:absolute;border:2px solid #3b82f6;background:rgba(59,130,246,0.18);display:none;box-sizing:border-box;pointer-events:none';
+  editor.appendChild(zoneRect);
+
+  // Buttons row
+  const btnRow = document.createElement('div');
+  btnRow.style.cssText = 'position:absolute;bottom:10px;left:50%;transform:translateX(-50%);display:flex;gap:8px;z-index:1';
+
+  const confirmBtn = document.createElement('button');
+  confirmBtn.textContent = 'Set Zone';
+  confirmBtn.style.cssText = 'display:none;padding:8px 18px;background:#3b82f6;color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer';
+
+  const clearBtn = document.createElement('button');
+  clearBtn.textContent = 'Full Frame';
+  clearBtn.style.cssText = 'padding:8px 14px;background:rgba(30,41,59,0.9);color:#f1f5f9;border:1.5px solid #475569;border-radius:10px;font-size:13px;cursor:pointer';
+
+  const cancelBtn = document.createElement('button');
+  cancelBtn.textContent = 'Cancel';
+  cancelBtn.style.cssText = 'padding:8px 14px;background:transparent;color:#94a3b8;border:none;font-size:13px;cursor:pointer';
+
+  btnRow.appendChild(confirmBtn);
+  btnRow.appendChild(clearBtn);
+  btnRow.appendChild(cancelBtn);
+  editor.appendChild(btnRow);
+  card.appendChild(editor);
+
+  // Pre-draw existing zone
+  let pendingZone = peer.zone ? { ...peer.zone } : null;
+  if (pendingZone) {
+    _applyZoneRect(zoneRect, pendingZone);
+    zoneRect.style.display = 'block';
+    confirmBtn.style.display = 'block';
+  }
+
+  // Drag logic
+  let dragStart = null;
+
+  function relPos(e) {
+    const r = editor.getBoundingClientRect();
+    const cx = e.touches ? e.touches[0].clientX : e.clientX;
+    const cy = e.touches ? e.touches[0].clientY : e.clientY;
+    return {
+      x: Math.max(0, Math.min(1, (cx - r.left)  / r.width)),
+      y: Math.max(0, Math.min(1, (cy - r.top)   / r.height)),
+    };
+  }
+
+  editor.addEventListener('mousedown', e => { dragStart = relPos(e); });
+  editor.addEventListener('touchstart', e => { dragStart = relPos(e); }, { passive: true });
+
+  function onDrag(e) {
+    if (!dragStart) return;
+    const cur = relPos(e);
+    const z = {
+      x: Math.min(dragStart.x, cur.x),
+      y: Math.min(dragStart.y, cur.y),
+      w: Math.abs(cur.x - dragStart.x),
+      h: Math.abs(cur.y - dragStart.y),
+    };
+    _applyZoneRect(zoneRect, z);
+    zoneRect.style.display = 'block';
+    pendingZone = z.w > 0.04 && z.h > 0.04 ? z : null;
+    confirmBtn.style.display = pendingZone ? 'block' : 'none';
+  }
+  editor.addEventListener('mousemove', onDrag);
+  editor.addEventListener('touchmove', e => { e.preventDefault(); onDrag(e); }, { passive: false });
+
+  const endDrag = () => { dragStart = null; };
+  editor.addEventListener('mouseup',  endDrag);
+  editor.addEventListener('touchend', endDrag);
+
+  confirmBtn.addEventListener('click', e => {
+    e.stopPropagation();
+    if (pendingZone) peer.zone = pendingZone;
+    updateZoneOverlay(cameraId);
+    editor.remove();
+  });
+  clearBtn.addEventListener('click', e => {
+    e.stopPropagation();
+    peer.zone = null;
+    updateZoneOverlay(cameraId);
+    editor.remove();
+  });
+  cancelBtn.addEventListener('click', e => { e.stopPropagation(); editor.remove(); });
+}
+
+function _applyZoneRect(el, z) {
+  el.style.left   = `${z.x * 100}%`;
+  el.style.top    = `${z.y * 100}%`;
+  el.style.width  = `${z.w * 100}%`;
+  el.style.height = `${z.h * 100}%`;
+}
+
+function updateZoneOverlay(cameraId) {
+  const peer = peers.get(cameraId);
+  const card = document.getElementById(`card-${cameraId}`);
+  if (!card) return;
+
+  let ov = card.querySelector('.zone-overlay');
+  const zoneBtn = card.querySelector('[data-action="zone"]');
+
+  if (!peer?.zone) {
+    ov?.remove();
+    if (zoneBtn) { zoneBtn.classList.remove('active'); zoneBtn.title = 'Detection zone'; }
+    return;
+  }
+
+  if (!ov) {
+    ov = document.createElement('div');
+    ov.className = 'zone-overlay';
+    ov.style.cssText = 'position:absolute;border:2px dashed rgba(59,130,246,0.8);pointer-events:none;box-sizing:border-box';
+    // Corner label
+    const lbl = document.createElement('div');
+    lbl.className = 'zone-label';
+    lbl.textContent = 'ZONE';
+    lbl.style.cssText = 'position:absolute;top:-1px;left:0;background:#3b82f6;color:#fff;font-size:9px;font-weight:700;padding:1px 5px;border-radius:0 0 4px 0;letter-spacing:0.5px';
+    ov.appendChild(lbl);
+    card.appendChild(ov);
+  }
+  _applyZoneRect(ov, peer.zone);
+  if (zoneBtn) { zoneBtn.classList.add('active'); zoneBtn.title = 'Detection zone (active — tap to edit)'; }
 }
 
 // ── Rename ─────────────────────────────────────────────────────
