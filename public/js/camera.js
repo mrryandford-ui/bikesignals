@@ -27,8 +27,17 @@ let torchOn    = false;
 let quality    = 720;
 let wakeLock   = null;
 let wsOpen     = false;
-let recorder   = null;
-let recordChunks = [];
+
+// ── Recording state ────────────────────────────────────────────
+const CAM_SEGMENT_MS  = 5 * 60 * 1000;
+let recorder          = null;
+let recordActive      = false;
+let recordChunks      = [];
+let recordDurationMs  = 0;
+let recordStartTime   = 0;
+let recordSegNum      = 0;
+let recordBaseName    = '';
+let recordSegTimer    = null;
 
 // ── Pre-fill room code from URL param ──────────────────────────
 const params = new URLSearchParams(location.search);
@@ -268,7 +277,7 @@ async function handleCommand({ command, value }) {
       }
       break;
     case 'record-start':
-      startCameraRecording();
+      startCameraRecording(value?.durationMs ?? 0);
       break;
     case 'record-stop':
       stopCameraRecording();
@@ -280,41 +289,67 @@ async function handleCommand({ command, value }) {
 }
 
 // ── Local recording ────────────────────────────────────────────
-function startCameraRecording() {
-  if (recorder && recorder.state !== 'inactive') return;
-  if (!localStream) return;
+function startCameraRecording(durationMs = 0) {
+  if (recordActive || !localStream) return;
   const mimeType = ['video/webm;codecs=vp8,opus', 'video/webm;codecs=vp8', 'video/webm']
     .find(t => MediaRecorder.isTypeSupported(t)) || '';
+  const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  recordActive     = true;
+  recordDurationMs = durationMs;
+  recordStartTime  = Date.now();
+  recordSegNum     = 0;
+  recordBaseName   = `CamNet_${(cameraName || 'Cam').replace(/[^a-zA-Z0-9]/g,'_')}_${ts}`;
+  _startCameraSegment(mimeType);
+  showToast('Recording started');
+  sendStatus();
+}
+
+function _startCameraSegment(mimeType) {
+  if (!recordActive || !localStream) return;
   recordChunks = [];
+  const multiSeg = recordDurationMs === 0 || recordDurationMs > CAM_SEGMENT_MS;
   try {
-    recorder = new MediaRecorder(localStream, mimeType ? { mimeType } : {});
-    recorder.ondataavailable = e => { if (e.data.size > 0) recordChunks.push(e.data); };
-    recorder.onstop = saveCameraRecording;
-    recorder.start();
-    showToast('Recording started');
-    sendStatus();
+    const rec = new MediaRecorder(localStream, mimeType ? { mimeType } : {});
+    recorder = rec;
+    rec.ondataavailable = e => { if (e.data.size > 0) recordChunks.push(e.data); };
+    rec.onstop = () => {
+      if (recordChunks.length > 0) {
+        const blob   = new Blob(recordChunks, { type: rec.mimeType });
+        const ext    = rec.mimeType.includes('mp4') ? 'mp4' : 'webm';
+        const suffix = multiSeg ? `_part${String(recordSegNum + 1).padStart(2,'0')}` : '';
+        _saveCameraSegment(blob, `${recordBaseName}${suffix}.${ext}`);
+        recordSegNum++;
+      }
+      recordChunks = [];
+      recorder = null;
+      sendStatus();
+      if (recordActive) _startCameraSegment(mimeType);
+    };
+    rec.start();
+    const elapsed     = Date.now() - recordStartTime;
+    const remaining   = recordDurationMs > 0 ? recordDurationMs - elapsed : Infinity;
+    const segDuration = Math.min(CAM_SEGMENT_MS, remaining > 0 ? remaining : CAM_SEGMENT_MS);
+    recordSegTimer = setTimeout(() => { if (rec.state !== 'inactive') rec.stop(); }, segDuration);
   } catch (e) {
+    recordActive = false;
     recorder = null;
     showToast('Recording not supported on this device');
+    sendStatus();
   }
 }
 
 function stopCameraRecording() {
-  if (recorder && recorder.state !== 'inactive') recorder.stop();
-  else { recorder = null; sendStatus(); }
+  recordActive = false;
+  clearTimeout(recordSegTimer); recordSegTimer = null;
+  if (recorder && recorder.state !== 'inactive') {
+    recorder.stop(); // triggers onstop → saves final segment
+  } else {
+    recorder = null;
+    sendStatus();
+  }
 }
 
-async function saveCameraRecording() {
-  if (!recordChunks.length) { recorder = null; sendStatus(); return; }
-  const mimeType = recorder?.mimeType || 'video/webm';
-  const blob = new Blob(recordChunks, { type: mimeType });
-  const ext  = mimeType.includes('mp4') ? 'mp4' : 'webm';
-  const name = (cameraName || 'Cam').replace(/[^a-zA-Z0-9]/g, '_');
-  const ts   = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-  const filename = `CamNet_${name}_${ts}.${ext}`;
-  recordChunks = [];
-  recorder = null;
-
+function _saveCameraSegment(blob, filename) {
   if (window.AndroidBridge) {
     const reader = new FileReader();
     reader.onloadend = () => window.AndroidBridge.saveVideo(reader.result, filename);
@@ -326,7 +361,6 @@ async function saveCameraRecording() {
     setTimeout(() => URL.revokeObjectURL(url), 30000);
     showToast('Video downloaded');
   }
-  sendStatus();
 }
 
 // ── Camera flip ────────────────────────────────────────────────
@@ -443,7 +477,7 @@ function sendStatus() {
     muted: !micEnabled,
     torch: torchOn,
     quality,
-    recording: !!(recorder && recorder.state === 'recording'),
+    recording: recordActive,
   });
 }
 

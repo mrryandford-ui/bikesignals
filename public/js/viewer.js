@@ -126,7 +126,7 @@ function onCameraJoined(cameraId, name) {
     if (pc.iceConnectionState === 'failed') pc.restartIce();
   };
 
-  peers.set(cameraId, { pc, name, stream: null, recorder: null, motion: null, facingMode: null, torchOn: false, quality: 720, recordTarget: null, recAutoStop: null });
+  peers.set(cameraId, { pc, name, stream: null, recorder: null, motion: null, facingMode: null, torchOn: false, quality: 720, recordTarget: null, recDurationMs: 0, recStartTime: 0, recSegNum: 0, recBaseName: '', recChunks: [], recSegTimer: null, recDurationTimer: null });
   addCameraCard(cameraId, name);
   updateCamCount();
 }
@@ -341,13 +341,13 @@ async function handleCardAction(cameraId, action, btn) {
       break;
 
     case 'record':
-      if (peer.recorder || peer.recordTarget) {
+      if (peer.recordTarget) {
         stopRecording(cameraId);
         btn.textContent = '⏺'; btn.classList.remove('active');
       } else {
-        const target = await showRecordingTargetPicker();
-        if (!target) break;
-        await startRecording(cameraId, target);
+        const opts = await showRecordingOptionsPicker(peer.quality);
+        if (!opts) break;
+        await startRecording(cameraId, opts.target, opts.durationMs);
         btn.textContent = '⏹'; btn.classList.add('active');
       }
       break;
@@ -447,62 +447,96 @@ function takeSnapshot(cameraId) {
 }
 
 // ── Recording ──────────────────────────────────────────────────
-async function startRecording(cameraId, target) {
+const REC_SEGMENT_MS = 5 * 60 * 1000; // 5-minute segments for long recordings
+
+async function startRecording(cameraId, target, durationMs) {
   const peer = peers.get(cameraId);
-  if (!peer) return;
-  peer.recordTarget = target;
+  if (!peer || peer.recordTarget) return;
+
+  const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  peer.recordTarget   = target;
+  peer.recDurationMs  = durationMs;
+  peer.recStartTime   = Date.now();
+  peer.recSegNum      = 0;
+  peer.recBaseName    = `CamNet_${(peer.name || cameraId).replace(/[^a-zA-Z0-9]/g,'_')}_${ts}`;
+  peer.recChunks      = [];
+
   showRecIndicator(cameraId, true);
 
-  // Auto-stop at 5 minutes to keep file sizes manageable
-  peer.recAutoStop = setTimeout(() => {
-    showToast('Recording auto-stopped (5 min limit)');
-    stopRecording(cameraId);
-    const b = document.querySelector(`#card-${cameraId} [data-action="record"]`);
-    if (b) { b.textContent = '⏺'; b.classList.remove('active'); }
-  }, 5 * 60 * 1000);
-
   if (target === 'camera' || target === 'both') {
-    wsSend({ type: 'camera-command', cameraId, command: 'record-start' });
+    wsSend({ type: 'camera-command', cameraId, command: 'record-start', value: { durationMs } });
   }
-
   if (target === 'monitor' || target === 'both') {
-    if (!peer.stream) { showToast('No stream to record'); return; }
-    const mimeType = ['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm','video/mp4']
-      .find(m => MediaRecorder.isTypeSupported(m)) || '';
-    const chunks = [];
-    try {
-      const rec = new MediaRecorder(peer.stream, mimeType ? { mimeType } : {});
-      rec.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
-      rec.onstop = () => saveMonitorRecording(cameraId, new Blob(chunks, { type: rec.mimeType }), rec.mimeType);
-      rec.start(1000);
-      peer.recorder = rec;
-    } catch (e) {
-      showToast('Monitor recording failed');
-      console.warn('Monitor recording failed:', e);
-    }
+    if (!peer.stream) { showToast('No stream to record'); stopRecording(cameraId); return; }
+    _startMonitorSegment(cameraId);
+  }
+  if (durationMs > 0) {
+    peer.recDurationTimer = setTimeout(() => {
+      stopRecording(cameraId);
+      const b = document.querySelector(`#card-${cameraId} [data-action="record"]`);
+      if (b) { b.textContent = '⏺'; b.classList.remove('active'); }
+      showToast('📹 Recording complete');
+    }, durationMs);
+  }
+}
+
+function _startMonitorSegment(cameraId) {
+  const peer = peers.get(cameraId);
+  if (!peer || !peer.recordTarget || !peer.stream) return;
+
+  const mimeType = ['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm','video/mp4']
+    .find(m => MediaRecorder.isTypeSupported(m)) || '';
+  const multiSegment = peer.recDurationMs === 0 || peer.recDurationMs > REC_SEGMENT_MS;
+
+  peer.recChunks = [];
+  try {
+    const rec = new MediaRecorder(peer.stream, mimeType ? { mimeType } : {});
+    peer.recorder = rec;
+    rec.ondataavailable = e => { if (e.data.size) peer.recChunks.push(e.data); };
+    rec.onstop = () => {
+      if (peer.recChunks.length > 0) {
+        const blob = new Blob(peer.recChunks, { type: rec.mimeType });
+        peer.recChunks = [];
+        const ext    = rec.mimeType.includes('mp4') ? 'mp4' : 'webm';
+        const suffix = multiSegment ? `_part${String(peer.recSegNum + 1).padStart(2,'0')}` : '';
+        const filename = `${peer.recBaseName}${suffix}.${ext}`;
+        peer.recSegNum++;
+        _saveMonitorSegment(filename, blob, rec.mimeType);
+      }
+      peer.recorder = null;
+      if (peer.recordTarget) _startMonitorSegment(cameraId); // chain next segment
+    };
+    rec.start(1000);
+
+    const elapsed      = Date.now() - peer.recStartTime;
+    const remaining    = peer.recDurationMs > 0 ? peer.recDurationMs - elapsed : Infinity;
+    const segDuration  = Math.min(REC_SEGMENT_MS, remaining);
+    peer.recSegTimer   = setTimeout(() => { if (rec.state !== 'inactive') rec.stop(); }, segDuration);
+  } catch (e) {
+    showToast('Monitor recording failed');
+    console.warn('Monitor recording failed:', e);
   }
 }
 
 function stopRecording(cameraId) {
   const peer = peers.get(cameraId);
-  if (!peer) return;
-  clearTimeout(peer.recAutoStop);
-  peer.recAutoStop = null;
+  if (!peer || !peer.recordTarget) return;
+  clearTimeout(peer.recSegTimer);     peer.recSegTimer = null;
+  clearTimeout(peer.recDurationTimer); peer.recDurationTimer = null;
   const target = peer.recordTarget;
   peer.recordTarget = null;
-  if (peer.recorder) { peer.recorder.stop(); peer.recorder = null; }
+  if (peer.recorder && peer.recorder.state !== 'inactive') {
+    peer.recorder.stop(); // triggers onstop → saves final segment
+  } else {
+    peer.recorder = null;
+  }
   if (target === 'camera' || target === 'both') {
     wsSend({ type: 'camera-command', cameraId, command: 'record-stop' });
   }
   showRecIndicator(cameraId, false);
 }
 
-async function saveMonitorRecording(cameraId, blob, mimeType) {
-  const peer = peers.get(cameraId);
-  const name = (peer?.name || cameraId).replace(/[^a-zA-Z0-9]/g, '_');
-  const ts   = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-  const ext  = (mimeType || '').includes('mp4') ? 'mp4' : 'webm';
-  const filename = `CamNet_${name}_${ts}.${ext}`;
+async function _saveMonitorSegment(filename, blob, mimeType) {
   try {
     const res = await fetch('/api/save-video', {
       method: 'POST',
@@ -510,7 +544,7 @@ async function saveMonitorRecording(cameraId, blob, mimeType) {
       body: await blob.arrayBuffer(),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    showToast('📹 Video saved to gallery');
+    showToast('📹 Saved to gallery');
   } catch {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -520,33 +554,133 @@ async function saveMonitorRecording(cameraId, blob, mimeType) {
   }
 }
 
-function showRecordingTargetPicker() {
+function showRecordingOptionsPicker(quality) {
   return new Promise((resolve) => {
-    const overlay = document.createElement('div');
-    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:9998;display:flex;align-items:center;justify-content:center';
-    const box = document.createElement('div');
-    box.style.cssText = 'background:#1e293b;border:1.5px solid #334155;border-radius:16px;padding:20px;min-width:240px;display:flex;flex-direction:column;gap:10px';
-    const title = document.createElement('div');
-    title.textContent = 'Save Recording On';
-    title.style.cssText = 'color:#94a3b8;font-size:13px;font-weight:600;text-align:center;margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px';
-    box.appendChild(title);
-    const options = [
-      { value: 'camera',  label: '📱 Camera Phone',   desc: 'Save on the camera device' },
-      { value: 'monitor', label: '🖥️ Monitor (here)',  desc: 'Save on this phone'        },
-      { value: 'both',    label: '📱🖥️ Both',           desc: 'Save on both devices'     },
+    const MB_PER_MIN = { 240: 3, 480: 8, 720: 20, 1080: 50 };
+    const q       = quality || 720;
+    const mbPerMin = MB_PER_MIN[q] || 20;
+
+    const durations = [
+      { ms: 60_000,    label: '1 min'    },
+      { ms: 180_000,   label: '3 min'    },
+      { ms: 300_000,   label: '5 min', isDefault: true },
+      { ms: 600_000,   label: '10 min'   },
+      { ms: 1_800_000, label: '30 min'   },
+      { ms: 0,         label: '∞ No limit' },
     ];
-    for (const opt of options) {
-      const btn = document.createElement('button');
-      btn.innerHTML = `<div style="font-size:15px;font-weight:600">${opt.label}</div><div style="font-size:12px;color:#64748b;margin-top:2px">${opt.desc}</div>`;
-      btn.style.cssText = 'padding:12px 16px;border:1.5px solid #334155;border-radius:10px;background:transparent;color:#f1f5f9;cursor:pointer;text-align:left;-webkit-tap-highlight-color:transparent';
-      btn.addEventListener('click', () => { document.body.removeChild(overlay); resolve(opt.value); });
-      box.appendChild(btn);
+    const targets = [
+      { value: 'camera',  label: '📱 Camera Phone'  },
+      { value: 'monitor', label: '🖥️ Monitor (here)', isDefault: true },
+      { value: 'both',    label: '📱🖥️ Both'          },
+    ];
+
+    let selDur = 300_000;
+    let selTarget = 'monitor';
+
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.65);z-index:9998;display:flex;align-items:flex-end;justify-content:center';
+
+    const box = document.createElement('div');
+    box.style.cssText = 'background:#1e293b;border-top:1.5px solid #334155;border-radius:20px 20px 0 0;padding:24px 20px 32px;width:100%;max-width:480px;display:flex;flex-direction:column;gap:16px';
+
+    const heading = document.createElement('div');
+    heading.textContent = '📹 Recording Options';
+    heading.style.cssText = 'color:#f1f5f9;font-size:16px;font-weight:700;text-align:center';
+    box.appendChild(heading);
+
+    // ── Duration chips ──
+    const durLabel = document.createElement('div');
+    durLabel.textContent = 'Duration';
+    durLabel.style.cssText = 'color:#94a3b8;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px';
+    box.appendChild(durLabel);
+
+    const durRow = document.createElement('div');
+    durRow.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px';
+    const durBtns = new Map();
+
+    function selectDur(ms) {
+      selDur = ms;
+      durBtns.forEach((b, k) => {
+        const on = k === ms;
+        b.style.borderColor = on ? '#3b82f6' : '#334155';
+        b.style.background  = on ? 'rgba(59,130,246,0.15)' : 'transparent';
+        b.style.color       = on ? '#60a5fa' : '#f1f5f9';
+        b.style.fontWeight  = on ? '700' : '400';
+      });
+      updateEstimate();
     }
-    const cancel = document.createElement('button');
-    cancel.textContent = 'Cancel';
-    cancel.style.cssText = 'padding:10px;border:none;background:transparent;color:#64748b;font-size:14px;cursor:pointer;margin-top:2px';
-    cancel.addEventListener('click', () => { document.body.removeChild(overlay); resolve(null); });
-    box.appendChild(cancel);
+
+    for (const d of durations) {
+      const b = document.createElement('button');
+      b.textContent = d.label;
+      b.style.cssText = `padding:8px 14px;border:1.5px solid ${d.isDefault ? '#3b82f6' : '#334155'};border-radius:20px;background:${d.isDefault ? 'rgba(59,130,246,0.15)' : 'transparent'};color:${d.isDefault ? '#60a5fa' : '#f1f5f9'};font-size:14px;font-weight:${d.isDefault ? '700' : '400'};cursor:pointer;-webkit-tap-highlight-color:transparent`;
+      b.addEventListener('click', () => selectDur(d.ms));
+      durBtns.set(d.ms, b);
+      durRow.appendChild(b);
+    }
+    box.appendChild(durRow);
+
+    // ── Save-on target ──
+    const savLabel = document.createElement('div');
+    savLabel.textContent = 'Save On';
+    savLabel.style.cssText = 'color:#94a3b8;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px';
+    box.appendChild(savLabel);
+
+    const savRow = document.createElement('div');
+    savRow.style.cssText = 'display:flex;flex-direction:column;gap:8px';
+    const targetBtns = new Map();
+
+    function selectTarget(v) {
+      selTarget = v;
+      targetBtns.forEach((b, k) => {
+        const on = k === v;
+        b.style.borderColor = on ? '#3b82f6' : '#334155';
+        b.style.background  = on ? 'rgba(59,130,246,0.15)' : 'transparent';
+        b.style.color       = on ? '#60a5fa' : '#f1f5f9';
+        b.style.fontWeight  = on ? '700' : '400';
+      });
+    }
+
+    for (const t of targets) {
+      const b = document.createElement('button');
+      b.textContent = t.label;
+      b.style.cssText = `padding:12px 16px;border:1.5px solid ${t.isDefault ? '#3b82f6' : '#334155'};border-radius:10px;background:${t.isDefault ? 'rgba(59,130,246,0.15)' : 'transparent'};color:${t.isDefault ? '#60a5fa' : '#f1f5f9'};font-size:15px;font-weight:${t.isDefault ? '700' : '400'};cursor:pointer;text-align:left;-webkit-tap-highlight-color:transparent`;
+      b.addEventListener('click', () => selectTarget(t.value));
+      targetBtns.set(t.value, b);
+      savRow.appendChild(b);
+    }
+    box.appendChild(savRow);
+
+    // ── Estimate info ──
+    const info = document.createElement('div');
+    info.style.cssText = 'background:#0f172a;border-radius:10px;padding:10px 14px;font-size:12px;color:#64748b;line-height:1.6';
+    box.appendChild(info);
+
+    function updateEstimate() {
+      const mins = selDur > 0 ? selDur / 60_000 : null;
+      const mb   = mins ? Math.round(mins * mbPerMin) : null;
+      const mbStr = mb ? (mb >= 1000 ? `${(mb/1000).toFixed(1)} GB` : `${mb} MB`) : `~${mbPerMin} MB/min`;
+      const seg  = selDur === 0 || selDur > REC_SEGMENT_MS;
+      let txt = `Quality: ${q}p  ·  Estimated size: ${mbStr}`;
+      if (seg) txt += '\nSaved as 5-min segments for long recordings.';
+      info.textContent = txt;
+      info.style.whiteSpace = 'pre-line';
+    }
+    updateEstimate();
+
+    // ── Start button ──
+    const startBtn = document.createElement('button');
+    startBtn.textContent = 'Start Recording';
+    startBtn.style.cssText = 'padding:15px;background:#ef4444;color:#fff;border:none;border-radius:12px;font-size:16px;font-weight:700;cursor:pointer;-webkit-tap-highlight-color:transparent';
+    startBtn.addEventListener('click', () => { document.body.removeChild(overlay); resolve({ target: selTarget, durationMs: selDur }); });
+    box.appendChild(startBtn);
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.style.cssText = 'padding:10px;border:none;background:transparent;color:#64748b;font-size:14px;cursor:pointer';
+    cancelBtn.addEventListener('click', () => { document.body.removeChild(overlay); resolve(null); });
+    box.appendChild(cancelBtn);
+
     overlay.appendChild(box);
     overlay.addEventListener('click', e => { if (e.target === overlay) { document.body.removeChild(overlay); resolve(null); } });
     document.body.appendChild(overlay);
