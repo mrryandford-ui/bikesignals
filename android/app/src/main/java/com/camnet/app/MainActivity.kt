@@ -156,7 +156,7 @@ class MainActivity : AppCompatActivity() {
         <div class="divider" id="divider" style="display:none">or</div>
         <div class="row">
           <span class="prefix">https://</span>
-          <input id="ip" type="text" inputmode="decimal" placeholder="192.168.0.43"
+          <input id="ip" type="text" inputmode="decimal"
                  autocomplete="off" autocorrect="off" spellcheck="false">
           <span class="suffix">:3443</span>
         </div>
