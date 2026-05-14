@@ -490,18 +490,21 @@ input[type="text"]::placeholder { color: var(--text-muted); }
 .cam-controls {
   position: absolute;
   bottom: 0; left: 0; right: 0;
-  padding: 8px 8px;
+  padding: 8px 8px 12px;
   display: flex;
   align-items: center;
   gap: 6px;
   overflow-x: auto;
-  scrollbar-width: none;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.35) transparent;
   -webkit-overflow-scrolling: touch;
   background: linear-gradient(to top, rgba(0,0,0,0.7), transparent);
   opacity: 0;
   transition: opacity 0.2s;
 }
-.cam-controls::-webkit-scrollbar { display: none; }
+.cam-controls::-webkit-scrollbar { height: 3px; }
+.cam-controls::-webkit-scrollbar-track { background: rgba(255,255,255,0.08); border-radius: 2px; }
+.cam-controls::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.35); border-radius: 2px; }
 .cam-card:hover .cam-controls,
 .cam-card.show-controls .cam-controls { opacity: 1; }
 .cam-controls .icon-btn { width: 32px; height: 32px; font-size: 14px; flex-shrink: 0; }
