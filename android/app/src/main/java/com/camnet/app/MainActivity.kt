@@ -110,7 +110,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ── Camera setup screen ───────────────────────────────────────
-    private fun setupHtml(): String = """
+    private fun setupHtml(): String {
+        val lastIp = try {
+            val url = getSharedPreferences("camnet", android.content.Context.MODE_PRIVATE)
+                .getString("server_url", "") ?: ""
+            android.net.Uri.parse(url).host ?: ""
+        } catch (_: Exception) { "" }
+        return """
         <!DOCTYPE html><html><head>
         <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
         <style>
@@ -156,7 +162,7 @@ class MainActivity : AppCompatActivity() {
         <div class="divider" id="divider" style="display:none">or</div>
         <div class="row">
           <span class="prefix">https://</span>
-          <input id="ip" type="text" inputmode="decimal"
+          <input id="ip" type="text" inputmode="decimal" value="$lastIp"
                  autocomplete="off" autocorrect="off" spellcheck="false">
           <span class="suffix">:3443</span>
         </div>
@@ -235,6 +241,7 @@ class MainActivity : AppCompatActivity() {
           }
         </script></body></html>
     """.trimIndent()
+    }
 
     // ── System UI ─────────────────────────────────────────────────
     private fun hideSystemBars() {
