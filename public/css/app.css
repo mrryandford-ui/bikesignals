@@ -465,7 +465,7 @@ input[type="text"]::placeholder { color: var(--text-muted); }
   object-fit: cover;
   display: block;
 }
-.cam-video.night { filter: brightness(1.8) contrast(1.1) saturate(0); }
+.cam-video.night { filter: saturate(0) brightness(1.6) contrast(1.15) sepia(0.9) hue-rotate(75deg); }
 .cam-video.mirror { transform: scaleX(-1); }
 
 /* card overlays */

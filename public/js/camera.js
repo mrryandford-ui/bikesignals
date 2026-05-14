@@ -278,11 +278,15 @@ async function flipCamera() {
 
   try {
     await initMedia();
-    // Replace video track in existing peer connection
+    // Replace both video and audio tracks — stopping the old stream also stops
+    // the old audio track, so the audio sender must be updated too
     if (pc) {
-      const newTrack = localStream.getVideoTracks()[0];
-      const sender = pc.getSenders().find(s => s.track?.kind === 'video');
-      if (sender && newTrack) await sender.replaceTrack(newTrack);
+      const newVideo = localStream.getVideoTracks()[0];
+      const newAudio = localStream.getAudioTracks()[0];
+      for (const sender of pc.getSenders()) {
+        if (sender.track?.kind === 'video' && newVideo) await sender.replaceTrack(newVideo);
+        if (sender.track?.kind === 'audio' && newAudio) await sender.replaceTrack(newAudio);
+      }
     }
     sendStatus();
   } catch (e) {

@@ -214,12 +214,23 @@ function onPong({ ts }) {
 }
 
 // ── Stream attachment ──────────────────────────────────────────
+function syncMuteBtn(cameraId) {
+  const video = document.querySelector(`#card-${cameraId} .cam-video`);
+  const btn   = document.querySelector(`#card-${cameraId} [data-action="mute"]`);
+  if (!video || !btn) return;
+  btn.textContent = video.muted ? '🔇' : '🔊';
+  btn.title       = video.muted ? 'Unmute' : 'Mute';
+  btn.classList.toggle('active', video.muted);
+}
+
 function attachStream(cameraId, stream) {
   const video = document.querySelector(`#card-${cameraId} .cam-video`);
   if (!video) return;
   video.srcObject = stream;
   video.muted = muteAll;
-  video.play().catch(() => { video.muted = true; video.play().catch(() => {}); });
+  video.play()
+    .catch(() => { video.muted = true; return video.play().catch(() => {}); })
+    .finally(() => syncMuteBtn(cameraId));
   applyMirror(cameraId);
   if (globalMotion) startMotion(cameraId);
 }
@@ -301,6 +312,7 @@ function handleCardAction(cameraId, action, btn) {
     case 'mute': {
       const muted = !video.muted;
       video.muted = muted;
+      if (!muted) video.play().catch(() => {}); // user-gesture re-play to unblock audio
       btn.title = muted ? 'Unmute' : 'Mute';
       btn.textContent = muted ? '🔇' : '🔊';
       btn.classList.toggle('active', muted);
