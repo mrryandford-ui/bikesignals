@@ -129,11 +129,31 @@ class MainActivity : AppCompatActivity() {
           button{width:100%;padding:15px;background:#3b82f6;color:#fff;border:none;
                  border-radius:14px;font-size:16px;font-weight:600;cursor:pointer;
                  -webkit-tap-highlight-color:transparent}
+          .outline{background:transparent;border:1.5px solid #334155;color:#f1f5f9}
           .back{background:transparent;color:#64748b;font-size:14px;padding:8px;width:auto}
           .hint{color:#475569;font-size:12px;text-align:center}
+          .divider{display:flex;align-items:center;width:100%;gap:10px;color:#334155;font-size:12px}
+          .divider::before,.divider::after{content:'';flex:1;border-top:1px solid #1e293b}
+          #scanner{display:none;position:fixed;inset:0;background:#000;z-index:10;
+                   flex-direction:column;align-items:center;justify-content:center;gap:20px}
+          #scanner.active{display:flex}
+          #scanVideo{width:100%;max-width:360px;border-radius:16px;object-fit:cover}
+          .scan-frame{position:relative;width:100%;max-width:360px}
+          .scan-corner{position:absolute;width:24px;height:24px;border-color:#3b82f6;border-style:solid}
+          .scan-corner.tl{top:0;left:0;border-width:3px 0 0 3px;border-radius:4px 0 0 0}
+          .scan-corner.tr{top:0;right:0;border-width:3px 3px 0 0;border-radius:0 4px 0 0}
+          .scan-corner.bl{bottom:0;left:0;border-width:0 0 3px 3px;border-radius:0 0 0 4px}
+          .scan-corner.br{bottom:0;right:0;border-width:0 3px 3px 0;border-radius:0 0 4px 0}
+          .scan-hint{color:#94a3b8;font-size:14px;text-align:center}
+          .scan-cancel{background:transparent;border:1.5px solid #334155;color:#94a3b8;
+                       font-size:15px;padding:12px 32px;border-radius:12px;width:auto}
         </style></head><body>
         <h1>📷 Join Session</h1>
-        <p>Enter the IP address shown on the Monitor phone</p>
+        <p>Scan the QR code on the Monitor phone, or enter the IP manually</p>
+        <button class="outline" id="scanBtn" onclick="startScan()" style="display:none">
+          &#x2317;&nbsp; Scan QR Code
+        </button>
+        <div class="divider" id="divider" style="display:none">or</div>
         <div class="row">
           <span class="prefix">https://</span>
           <input id="ip" type="text" inputmode="decimal" placeholder="192.168.0.43"
@@ -141,22 +161,69 @@ class MainActivity : AppCompatActivity() {
           <span class="suffix">:3443</span>
         </div>
         <button onclick="connect()">Connect &rarr;</button>
-        <button class="back" onclick="AndroidBridge.showCameraSetup !== undefined && history.back()">← Back</button>
-        <p class="hint">First visit: tap Advanced → Proceed (once only)</p>
+        <button class="back" id="backBtn">← Back</button>
+        <p class="hint">First visit: tap Advanced &rarr; Proceed (once only)</p>
+
+        <!-- QR scanner overlay -->
+        <div id="scanner">
+          <div class="scan-frame">
+            <video id="scanVideo" autoplay playsinline muted></video>
+            <div class="scan-corner tl"></div><div class="scan-corner tr"></div>
+            <div class="scan-corner bl"></div><div class="scan-corner br"></div>
+          </div>
+          <p class="scan-hint">Point at the QR code on the Monitor phone</p>
+          <button class="scan-cancel" onclick="stopScan()">Cancel</button>
+        </div>
+
         <script>
           document.getElementById('ip').focus();
+          document.getElementById('backBtn').onclick = function(){ AndroidBridge.resetServer(); };
+
+          // Show scan button only if BarcodeDetector is supported
+          if ('BarcodeDetector' in window) {
+            document.getElementById('scanBtn').style.display = 'block';
+            document.getElementById('divider').style.display = 'flex';
+          }
+
           function connect(){
-            var ip=document.getElementById('ip').value.trim().replace(/[\/\s]/g,'');
-            if(!ip)return;
-            document.querySelector('button').textContent='Connecting…';
+            var ip = document.getElementById('ip').value.trim().replace(/[\/\s]/g,'');
+            if(!ip) return;
+            document.querySelector('button[onclick="connect()"]').textContent = 'Connecting…';
             AndroidBridge.setServerUrl('https://'+ip+':3443');
           }
-          document.getElementById('ip').addEventListener('keydown',function(e){
-            if(e.key==='Enter')connect();
+          document.getElementById('ip').addEventListener('keydown', function(e){
+            if(e.key === 'Enter') connect();
           });
-          document.querySelector('.back').onclick=function(){
-            AndroidBridge.resetServer();
-          };
+
+          var scanStream = null, scanInterval = null;
+          async function startScan() {
+            try {
+              scanStream = await navigator.mediaDevices.getUserMedia(
+                {video:{facingMode:'environment',width:{ideal:1280},height:{ideal:720}}}
+              );
+              var video = document.getElementById('scanVideo');
+              video.srcObject = scanStream;
+              document.getElementById('scanner').classList.add('active');
+              var detector = new BarcodeDetector({formats:['qr_code']});
+              scanInterval = setInterval(async function(){
+                if(video.readyState < 2) return;
+                try {
+                  var codes = await detector.detect(video);
+                  if(codes.length > 0){
+                    stopScan();
+                    AndroidBridge.openCameraFromQR(codes[0].rawValue);
+                  }
+                } catch(e){}
+              }, 250);
+            } catch(e) {
+              alert('Camera access denied — enter IP manually.');
+            }
+          }
+          function stopScan(){
+            clearInterval(scanInterval); scanInterval = null;
+            if(scanStream){ scanStream.getTracks().forEach(function(t){t.stop();}); scanStream = null; }
+            document.getElementById('scanner').classList.remove('active');
+          }
         </script></body></html>
     """.trimIndent()
 

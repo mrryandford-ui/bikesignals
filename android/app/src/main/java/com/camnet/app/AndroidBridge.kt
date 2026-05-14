@@ -41,6 +41,27 @@ class AndroidBridge(
         (context as? MainActivity)?.runOnUiThread { onLoadUrl("$clean/camera.html") }
     }
 
+    /**
+     * Called from the QR scanner in the setup screen.
+     * Parses the full join URL (https://IP:3443/?room=ABCDEF), saves the base
+     * URL, and loads camera.html with the room code pre-filled via ?room=.
+     */
+    @JavascriptInterface
+    fun openCameraFromQR(scannedUrl: String) {
+        try {
+            val uri = android.net.Uri.parse(scannedUrl.trim())
+            val port = if (uri.port != -1) ":${uri.port}" else ""
+            val base = "${uri.scheme}://${uri.host}$port"
+            val room = uri.getQueryParameter("room") ?: ""
+            context.getSharedPreferences("camnet", Context.MODE_PRIVATE)
+                .edit().putString("server_url", base).apply()
+            val dest = if (room.isNotEmpty()) "$base/camera.html?room=$room" else "$base/camera.html"
+            (context as? MainActivity)?.runOnUiThread { onLoadUrl(dest) }
+        } catch (e: Exception) {
+            android.util.Log.w("CamNet", "openCameraFromQR failed: $e")
+        }
+    }
+
     /** Called from camera.js long-press on session code to reset the server URL. */
     @JavascriptInterface
     fun resetServer() {
