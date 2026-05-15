@@ -126,6 +126,19 @@
       <button class="toggle" id="motionAutoSnapToggle" aria-label="Auto-snapshot on motion"></button>
     </div>
     <div class="panel-row">
+      <span class="panel-label">Flash on motion</span>
+      <button class="toggle" id="motionFlashToggle" aria-label="Flash on motion"></button>
+    </div>
+    <div class="panel-row" id="motionFlashStillRow" style="display:none">
+      <span class="panel-label">Flash stays on for</span>
+      <div class="seg-ctrl" id="motionFlashStillSeg">
+        <button class="seg-btn" data-mins="1">1 min</button>
+        <button class="seg-btn active" data-mins="2">2 min</button>
+        <button class="seg-btn" data-mins="5">5 min</button>
+        <button class="seg-btn" data-mins="10">10 min</button>
+      </div>
+    </div>
+    <div class="panel-row">
       <span class="panel-label">Mute all audio</span>
       <button class="toggle" id="muteAllToggle" aria-label="Mute all"></button>
     </div>

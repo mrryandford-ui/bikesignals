@@ -127,7 +127,7 @@ function onCameraJoined(cameraId, name) {
     if (pc.iceConnectionState === 'failed') pc.restartIce();
   };
 
-  peers.set(cameraId, { pc, name, stream: null, recorder: null, motion: null, facingMode: null, torchOn: false, quality: 720, recordTarget: null, recDurationMs: 0, recStartTime: 0, recSegNum: 0, recBaseName: '', recChunks: [], recSegTimer: null, recDurationTimer: null, zone: null, lastMotionAt: 0 });
+  peers.set(cameraId, { pc, name, stream: null, recorder: null, motion: null, facingMode: null, torchOn: false, quality: 720, recordTarget: null, recDurationMs: 0, recStartTime: 0, recSegNum: 0, recBaseName: '', recChunks: [], recSegTimer: null, recDurationTimer: null, zone: null, lastMotionAt: 0, motionFlashActive: false, motionFlashTimer: null, timelapse: null });
   addCameraCard(cameraId, name);
   updateCamCount();
 }
@@ -137,6 +137,8 @@ function onCameraLeft(cameraId) {
   if (peer) {
     stopMotion(cameraId);
     stopRecording(cameraId);
+    stopTimelapse(cameraId);
+    clearTimeout(peer.motionFlashTimer);
     peer.pc.close();
     peers.delete(cameraId);
   }
@@ -276,6 +278,7 @@ function addCameraCard(cameraId, name) {
     <div class="cam-controls">
       <button class="icon-btn" data-action="fullscreen"  title="Fullscreen">⛶</button>
       <button class="icon-btn" data-action="snapshot"    title="Snapshot">📸</button>
+      <button class="icon-btn" data-action="timelapse"   title="Timelapse">⏱</button>
       <button class="icon-btn" data-action="record"      title="Record">⏺</button>
       <button class="icon-btn" data-action="mute"        title="Mute">🔊</button>
       <button class="icon-btn" data-action="nightvision" title="Night vision">🌙</button>
@@ -346,6 +349,18 @@ async function handleCardAction(cameraId, action, btn) {
       openZoneEditor(cameraId);
       break;
 
+    case 'timelapse':
+      if (peer.timelapse) {
+        stopTimelapse(cameraId);
+        btn.classList.remove('active');
+      } else {
+        const tlOpts = await showTimelapsePicker(peer.quality);
+        if (!tlOpts) break;
+        startTimelapse(cameraId, tlOpts);
+        btn.classList.add('active');
+      }
+      break;
+
     case 'record':
       if (peer.recordTarget) {
         stopRecording(cameraId);
@@ -365,10 +380,16 @@ async function handleCardAction(cameraId, action, btn) {
       break;
 
     case 'flash': {
-      if (peer.facingMode === 'user') break; // front camera has no flash
+      if (peer.facingMode === 'user') break;
       peer.torchOn = !peer.torchOn;
       wsSend({ type: 'camera-command', cameraId, command: 'torch-toggle' });
       btn.classList.toggle('active', peer.torchOn);
+      if (!peer.torchOn) {
+        // User manually turned off — cancel any motion-flash auto-off timer
+        peer.motionFlashActive = false;
+        clearTimeout(peer.motionFlashTimer);
+        peer.motionFlashTimer = null;
+      }
       showToast(peer.torchOn ? '🔦 Flash on' : '🔦 Flash off');
       break;
     }
@@ -706,8 +727,10 @@ function showRecIndicator(cameraId, show) {
 }
 
 // ── Motion detection ───────────────────────────────────────────
-let motionNotifEnabled = false;
-let motionAutoSnap     = false;
+let motionNotifEnabled  = false;
+let motionAutoSnap      = false;
+let motionFlash         = false;
+let motionFlashStillMins = 2;
 
 function startMotion(cameraId) {
   const peer = peers.get(cameraId);
@@ -811,10 +834,294 @@ function showMotionAlert(cameraId) {
     });
   }
   if (motionAutoSnap) takeSnapshot(cameraId);
+  if (motionFlash && peer.facingMode !== 'user') triggerMotionFlash(cameraId);
 }
 
 function hideMotionAlert(cameraId) {
   document.querySelector(`#card-${cameraId} .motion-alert`)?.classList.remove('visible');
+}
+
+// ── Motion flash ───────────────────────────────────────────────
+function triggerMotionFlash(cameraId) {
+  const peer = peers.get(cameraId);
+  if (!peer || peer.facingMode === 'user') return;
+
+  if (!peer.torchOn) {
+    peer.torchOn = true;
+    peer.motionFlashActive = true;
+    wsSend({ type: 'camera-command', cameraId, command: 'torch-toggle' });
+    const flashBtn = document.querySelector(`#card-${cameraId} [data-action="flash"]`);
+    if (flashBtn) flashBtn.classList.add('active');
+  }
+
+  // Reset still timer on every motion event
+  clearTimeout(peer.motionFlashTimer);
+  peer.motionFlashTimer = setTimeout(() => {
+    peer.motionFlashTimer = null;
+    if (!peer.motionFlashActive || !peer.torchOn) return;
+    peer.torchOn = false;
+    peer.motionFlashActive = false;
+    wsSend({ type: 'camera-command', cameraId, command: 'torch-toggle' });
+    const flashBtn = document.querySelector(`#card-${cameraId} [data-action="flash"]`);
+    if (flashBtn) flashBtn.classList.remove('active');
+  }, motionFlashStillMins * 60 * 1000);
+}
+
+// ── Timelapse ──────────────────────────────────────────────────
+function startTimelapse(cameraId, cfg) {
+  const peer = peers.get(cameraId);
+  if (!peer || peer.timelapse) return;
+  const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const base = `TL_${(peer.name || cameraId).replace(/[^a-zA-Z0-9]/g, '_')}_${ts}`;
+  peer.timelapse = { cfg, frames: [], photoCount: 0, base, durationTimer: null, intervalHandle: null };
+
+  async function tick() {
+    const blob = await _captureTlFrame(cameraId);
+    if (!blob || !peer.timelapse) return;
+    const tl = peer.timelapse;
+    tl.photoCount++;
+    const suffix = `_${String(tl.photoCount).padStart(4, '0')}`;
+    if (cfg.mode === 'photos' || cfg.mode === 'both') {
+      _saveTlPhoto(blob, `${base}${suffix}.jpg`);
+    }
+    if (cfg.mode === 'video' || cfg.mode === 'both') {
+      tl.frames.push(blob);
+    }
+    _updateTlIndicator(cameraId);
+  }
+
+  tick(); // capture immediately on start
+  peer.timelapse.intervalHandle = setInterval(tick, cfg.intervalMs);
+
+  if (cfg.durationMs > 0) {
+    peer.timelapse.durationTimer = setTimeout(() => {
+      stopTimelapse(cameraId);
+      const b = document.querySelector(`#card-${cameraId} [data-action="timelapse"]`);
+      if (b) b.classList.remove('active');
+      showToast('⏱ Timelapse complete');
+    }, cfg.durationMs);
+  }
+}
+
+function stopTimelapse(cameraId) {
+  const peer = peers.get(cameraId);
+  const tl = peer?.timelapse;
+  if (!tl) return;
+  clearInterval(tl.intervalHandle);
+  clearTimeout(tl.durationTimer);
+  peer.timelapse = null;
+  _updateTlIndicator(cameraId);
+
+  if ((tl.cfg.mode === 'video' || tl.cfg.mode === 'both') && tl.frames.length > 0) {
+    showToast('⏱ Rendering timelapse video…');
+    _renderTlVideo(tl.frames).then(blob => {
+      if (!blob) return;
+      const ext = blob.type.includes('mp4') ? 'mp4' : 'webm';
+      _saveMonitorSegment(`${tl.base}_timelapse.${ext}`, blob, blob.type);
+    });
+  }
+}
+
+async function _captureTlFrame(cameraId) {
+  const video = document.querySelector(`#card-${cameraId} .cam-video`);
+  if (!video || !video.videoWidth) return null;
+  const canvas = document.createElement('canvas');
+  canvas.width  = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext('2d').drawImage(video, 0, 0);
+  return new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.88));
+}
+
+async function _saveTlPhoto(blob, filename) {
+  if (window.AndroidBridge) {
+    const reader = new FileReader();
+    reader.onloadend = () => window.AndroidBridge.saveSnapshot(reader.result, filename);
+    reader.readAsDataURL(blob);
+  } else {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  }
+}
+
+async function _renderTlVideo(frames) {
+  try {
+    const bitmaps = await Promise.all(frames.map(b => createImageBitmap(b)));
+    const canvas  = document.createElement('canvas');
+    canvas.width  = bitmaps[0].width;
+    canvas.height = bitmaps[0].height;
+    const ctx     = canvas.getContext('2d');
+    const mimeType = ['video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm']
+      .find(m => MediaRecorder.isTypeSupported(m)) || 'video/webm';
+    const stream  = canvas.captureStream(24);
+    const rec     = new MediaRecorder(stream, { mimeType });
+    const chunks  = [];
+    return new Promise(resolve => {
+      rec.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+      rec.onstop = () => {
+        bitmaps.forEach(b => b.close());
+        resolve(new Blob(chunks, { type: rec.mimeType }));
+      };
+      rec.start();
+      let i = 0;
+      (function tick() {
+        if (i >= bitmaps.length) { rec.stop(); return; }
+        ctx.drawImage(bitmaps[i++], 0, 0);
+        setTimeout(tick, 1000 / 24);
+      })();
+    });
+  } catch (e) {
+    console.warn('Timelapse render failed:', e);
+    showToast('Timelapse render failed');
+    return null;
+  }
+}
+
+function _updateTlIndicator(cameraId) {
+  const peer = peers.get(cameraId);
+  const card = document.getElementById(`card-${cameraId}`);
+  if (!card) return;
+  let ind = card.querySelector('.tl-indicator');
+  if (peer?.timelapse) {
+    if (!ind) {
+      ind = document.createElement('div');
+      ind.className = 'tl-indicator';
+      card.appendChild(ind);
+    }
+    const tl = peer.timelapse;
+    const modeIcon = tl.cfg.mode === 'photos' ? '📸' : tl.cfg.mode === 'video' ? '🎬' : '📸🎬';
+    ind.textContent = `⏱ ${modeIcon} ${tl.photoCount}`;
+  } else {
+    ind?.remove();
+  }
+}
+
+function showTimelapsePicker(quality) {
+  return new Promise(resolve => {
+    const q = quality || 720;
+    const intervals = [
+      { ms: 10_000,     label: '10 sec' },
+      { ms: 30_000,     label: '30 sec' },
+      { ms: 60_000,     label: '1 min', isDefault: true },
+      { ms: 300_000,    label: '5 min' },
+      { ms: 900_000,    label: '15 min' },
+      { ms: 1_800_000,  label: '30 min' },
+      { ms: 3_600_000,  label: '1 hr'  },
+    ];
+    const durations = [
+      { ms: 3_600_000,   label: '1 hr'  },
+      { ms: 14_400_000,  label: '4 hr'  },
+      { ms: 28_800_000,  label: '8 hr', isDefault: true },
+      { ms: 0,           label: '∞'     },
+    ];
+    const modes = [
+      { value: 'photos', label: '📸 Photos only',   isDefault: true },
+      { value: 'video',  label: '🎬 Timelapse video'               },
+      { value: 'both',   label: '📸🎬 Both'                        },
+    ];
+
+    let selInterval = 60_000;
+    let selDuration = 28_800_000;
+    let selMode     = 'photos';
+
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.65);z-index:9998;display:flex;align-items:flex-end;justify-content:center;overflow-y:auto';
+    const box = document.createElement('div');
+    box.style.cssText = 'background:#1e293b;border-top:1.5px solid #334155;border-radius:20px 20px 0 0;padding:24px 20px 36px;width:100%;max-width:480px;display:flex;flex-direction:column;gap:14px';
+
+    const heading = document.createElement('div');
+    heading.textContent = '⏱ Timelapse Options';
+    heading.style.cssText = 'color:#f1f5f9;font-size:16px;font-weight:700;text-align:center';
+    box.appendChild(heading);
+
+    function makeSection(labelText) {
+      const lbl = document.createElement('div');
+      lbl.textContent = labelText;
+      lbl.style.cssText = 'color:#94a3b8;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px';
+      box.appendChild(lbl);
+    }
+
+    function makeChips(items, getter, setter) {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px';
+      const btns = new Map();
+      function select(val) {
+        setter(val);
+        btns.forEach((b, k) => {
+          const on = k === val;
+          b.style.borderColor = on ? '#3b82f6' : '#334155';
+          b.style.background  = on ? 'rgba(59,130,246,0.15)' : 'transparent';
+          b.style.color       = on ? '#60a5fa' : '#f1f5f9';
+          b.style.fontWeight  = on ? '700' : '400';
+        });
+        updateEstimate();
+      }
+      for (const it of items) {
+        const b = document.createElement('button');
+        b.textContent = it.label;
+        const on = it.isDefault;
+        b.style.cssText = `padding:8px 14px;border:1.5px solid ${on ? '#3b82f6' : '#334155'};border-radius:20px;background:${on ? 'rgba(59,130,246,0.15)' : 'transparent'};color:${on ? '#60a5fa' : '#f1f5f9'};font-size:14px;font-weight:${on ? '700' : '400'};cursor:pointer;-webkit-tap-highlight-color:transparent`;
+        b.addEventListener('click', () => select(it.ms ?? it.value));
+        btns.set(it.ms ?? it.value, b);
+        row.appendChild(b);
+      }
+      box.appendChild(row);
+      return btns;
+    }
+
+    makeSection('Capture Mode');
+    makeChips(modes, () => selMode, v => { selMode = v; });
+
+    makeSection('Interval');
+    makeChips(intervals, () => selInterval, v => { selInterval = v; });
+
+    makeSection('Duration');
+    makeChips(durations, () => selDuration, v => { selDuration = v; });
+
+    // Estimate
+    const info = document.createElement('div');
+    info.style.cssText = 'background:#0f172a;border-radius:10px;padding:10px 14px;font-size:12px;color:#64748b;line-height:1.6';
+    box.appendChild(info);
+
+    function updateEstimate() {
+      const totalMins   = selDuration > 0 ? selDuration / 60_000 : null;
+      const intervalMin = selInterval / 60_000;
+      const frames      = totalMins ? Math.round(totalMins / intervalMin) : null;
+      const videoSecs   = frames ? (frames / 24).toFixed(1) : null;
+      let txt = frames
+        ? `${frames.toLocaleString()} captures`
+        : `~${Math.round(60 / intervalMin)}/hr`;
+      if (selMode !== 'photos' && frames)
+        txt += `  →  ${videoSecs}s video at 24fps`;
+      if (selMode !== 'photos' && !frames)
+        txt += `  →  timelapse rendered on stop`;
+      if (frames && frames > 800)
+        txt += '\n⚠ High frame count — video render may take time.';
+      info.textContent = txt;
+      info.style.whiteSpace = 'pre-line';
+    }
+    updateEstimate();
+
+    const startBtn = document.createElement('button');
+    startBtn.textContent = 'Start Timelapse';
+    startBtn.style.cssText = 'padding:15px;background:#3b82f6;color:#fff;border:none;border-radius:12px;font-size:16px;font-weight:700;cursor:pointer;-webkit-tap-highlight-color:transparent';
+    startBtn.addEventListener('click', () => {
+      document.body.removeChild(overlay);
+      resolve({ mode: selMode, intervalMs: selInterval, durationMs: selDuration });
+    });
+    box.appendChild(startBtn);
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.style.cssText = 'padding:10px;border:none;background:transparent;color:#64748b;font-size:14px;cursor:pointer';
+    cancelBtn.addEventListener('click', () => { document.body.removeChild(overlay); resolve(null); });
+    box.appendChild(cancelBtn);
+
+    overlay.appendChild(box);
+    overlay.addEventListener('click', e => { if (e.target === overlay) { document.body.removeChild(overlay); resolve(null); } });
+    document.body.appendChild(overlay);
+  });
 }
 
 // ── Detection zone editor ──────────────────────────────────────
@@ -1049,6 +1356,20 @@ document.getElementById('mirrorToggle').addEventListener('click', function() {
 document.getElementById('motionAutoSnapToggle').addEventListener('click', function() {
   motionAutoSnap = !motionAutoSnap;
   this.classList.toggle('on', motionAutoSnap);
+});
+
+document.getElementById('motionFlashToggle').addEventListener('click', function() {
+  motionFlash = !motionFlash;
+  this.classList.toggle('on', motionFlash);
+  document.getElementById('motionFlashStillRow').style.display = motionFlash ? '' : 'none';
+});
+
+document.getElementById('motionFlashStillSeg').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-mins]');
+  if (!btn) return;
+  document.querySelectorAll('#motionFlashStillSeg .seg-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  motionFlashStillMins = parseInt(btn.dataset.mins, 10);
 });
 
 document.getElementById('motionSensSeg').addEventListener('click', (e) => {
