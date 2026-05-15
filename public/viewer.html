@@ -139,6 +139,19 @@
       </div>
     </div>
     <div class="panel-row">
+      <span class="panel-label">Smart detection (AI)</span>
+      <button class="toggle" id="smartDetectionToggle" aria-label="Smart detection"></button>
+    </div>
+    <div class="panel-row" id="smartDetectionStatusRow" style="display:none">
+      <span class="panel-label" style="font-size:11px;color:var(--text-muted);text-transform:none;letter-spacing:0">AI status</span>
+      <span id="smartDetectionStatus" style="font-size:12px;color:var(--accent);font-weight:600">—</span>
+    </div>
+    <div class="panel-row" id="smartClassesRow" style="display:none;flex-direction:column;align-items:stretch;gap:10px">
+      <span class="panel-label">Alert on these objects</span>
+      <div id="smartClassesContainer" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+      <span style="font-size:11px;color:var(--text-muted);line-height:1.4">Motion alerts fire only when one of these is detected. Runs on-device, no cloud.</span>
+    </div>
+    <div class="panel-row">
       <span class="panel-label">Photo quality</span>
       <div class="seg-ctrl" id="photoQualitySeg">
         <button class="seg-btn" data-q="480">480p</button>

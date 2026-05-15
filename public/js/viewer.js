@@ -80,6 +80,78 @@ const SENS = {
 };
 const MOTION_COOLDOWN_MS = 15_000; // min ms between alerts per camera
 
+// ── AI smart detection (COCO-SSD via TensorFlow.js, on-device) ─
+let smartDetectionEnabled = false;
+let smartClasses          = new Set(['person']);
+let cocoModel             = null;
+let cocoLoadingPromise    = null;
+const SMART_DETECTION_COOLDOWN_MS = 3_000; // min ms between AI inferences per camera
+const SMART_SCORE_THRESHOLD       = 0.45;  // confidence floor
+
+const SMART_CLASS_OPTIONS = [
+  { value: 'person',     label: '🚶 Person',    defaultOn: true },
+  { value: 'car',        label: '🚗 Car' },
+  { value: 'motorcycle', label: '🏍 Motorcycle' },
+  { value: 'bicycle',    label: '🚲 Bicycle' },
+  { value: 'truck',      label: '🚛 Truck' },
+  { value: 'bus',        label: '🚌 Bus' },
+  { value: 'dog',        label: '🐕 Dog' },
+  { value: 'cat',        label: '🐈 Cat' },
+];
+
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = src; s.async = true;
+    s.onload  = () => resolve();
+    s.onerror = () => reject(new Error('Failed to load ' + src));
+    document.head.appendChild(s);
+  });
+}
+
+async function loadCocoModel() {
+  if (cocoModel) return cocoModel;
+  if (cocoLoadingPromise) return cocoLoadingPromise;
+  cocoLoadingPromise = (async () => {
+    updateSmartStatus('Loading TensorFlow…');
+    if (!window.tf) {
+      await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.21.0/dist/tf.min.js');
+    }
+    updateSmartStatus('Loading detection model…');
+    if (!window.cocoSsd) {
+      await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js');
+    }
+    updateSmartStatus('Warming up…');
+    cocoModel = await window.cocoSsd.load({ base: 'lite_mobilenet_v2' });
+    updateSmartStatus('AI ready — on-device, no cloud');
+    return cocoModel;
+  })().catch(e => {
+    cocoLoadingPromise = null;
+    cocoModel = null;
+    updateSmartStatus('Failed to load — needs internet on first use');
+    console.warn('COCO-SSD load failed:', e);
+    showToast('AI model failed to load — check connection');
+    throw e;
+  });
+  return cocoLoadingPromise;
+}
+
+function updateSmartStatus(text) {
+  const el = document.getElementById('smartDetectionStatus');
+  if (el) el.textContent = text;
+}
+
+async function runSmartDetection(video) {
+  if (!cocoModel) return null;
+  try {
+    const detections = await cocoModel.detect(video, 8);
+    return detections.filter(d => d.score >= SMART_SCORE_THRESHOLD && smartClasses.has(d.class));
+  } catch (e) {
+    console.warn('Detection failed:', e);
+    return null;
+  }
+}
+
 // ── WebSocket ──────────────────────────────────────────────────
 function connectWS() {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -368,7 +440,7 @@ function addCameraCard(cameraId, name) {
       <button class="icon-btn" data-action="zone"        title="Detection zone">🔳</button>
       <button class="icon-btn" data-action="flip"        title="Flip camera (remote)">🔄</button>
       <button class="icon-btn" data-action="flash"       title="Toggle flash (remote)">🔦</button>
-      <button class="icon-btn" data-action="stealth"     title="Stealth mode (remote)">🕵️</button>
+      <button class="icon-btn" data-action="stealth"     title="Stealth mode (remote)">🥷</button>
       <button class="icon-btn" data-action="quality"     title="Quality: 720p">🎞️</button>
       <button class="icon-btn" data-action="rename"      title="Rename">✏️</button>
       <button class="icon-btn danger" data-action="disconnect" title="Disconnect">✕</button>
@@ -419,17 +491,28 @@ async function handleCardAction(cameraId, action, btn) {
       btn.title = muted ? 'Unmute' : 'Mute';
       btn.textContent = muted ? '🔇' : '🔊';
       btn.classList.toggle('active', muted);
+      showToast(muted ? `🔇 ${peer.name} muted` : `🔊 ${peer.name} unmuted`);
       break;
     }
 
-    case 'nightvision':
+    case 'nightvision': {
       video.classList.toggle('night');
-      btn.classList.toggle('active', video.classList.contains('night'));
+      const on = video.classList.contains('night');
+      btn.classList.toggle('active', on);
+      showToast(on ? '🌙 Night vision on' : '🌙 Night vision off');
       break;
+    }
 
     case 'motion':
-      if (peer.motion) { stopMotion(cameraId); btn.classList.remove('active'); }
-      else              { startMotion(cameraId); btn.classList.add('active'); }
+      if (peer.motion) {
+        stopMotion(cameraId);
+        btn.classList.remove('active');
+        showToast('🎯 Motion detection off');
+      } else {
+        startMotion(cameraId);
+        btn.classList.add('active');
+        showToast(smartDetectionEnabled ? '🧠 Smart motion detection on' : '🎯 Motion detection on');
+      }
       break;
 
     case 'zone':
@@ -464,6 +547,7 @@ async function handleCardAction(cameraId, action, btn) {
       wsSend({ type: 'camera-command', cameraId, command: 'flip' });
       btn.style.transform = 'rotate(180deg)';
       setTimeout(() => btn.style.transform = '', 400);
+      showToast(`🔄 ${peer.name} — flipping camera`);
       break;
 
     case 'flash': {
@@ -586,6 +670,8 @@ async function startRecording(cameraId, target, durationMs) {
   peer.recChunks      = [];
 
   showRecIndicator(cameraId, true);
+  const targetLabel = target === 'both' ? 'camera + monitor' : target;
+  showToast(`⏺ Recording started (${targetLabel})`);
 
   if (target === 'camera' || target === 'both') {
     wsSend({ type: 'camera-command', cameraId, command: 'record-start', value: { durationMs } });
@@ -885,9 +971,28 @@ function startMotion(cameraId) {
 
       const now = Date.now();
       if (total > 0 && changed / total > fraction && now >= peer.lastMotionAt + MOTION_COOLDOWN_MS) {
-        showMotionAlert(cameraId);
-        clearTimeout(alertTimeout);
-        alertTimeout = setTimeout(() => hideMotionAlert(cameraId), 4000);
+        if (smartDetectionEnabled && cocoModel && !peer.pendingSmartDetect) {
+          // AI mode: only alert if a tracked class is actually present.
+          if (now < (peer.lastSmartAt || 0) + SMART_DETECTION_COOLDOWN_MS) {
+            // skip — too soon since last inference
+          } else {
+            peer.lastSmartAt        = now;
+            peer.pendingSmartDetect = true;
+            runSmartDetection(video).then(matches => {
+              peer.pendingSmartDetect = false;
+              if (matches && matches.length > 0) {
+                const best = matches.reduce((a, b) => a.score > b.score ? a : b);
+                showMotionAlert(cameraId, best.class);
+                clearTimeout(alertTimeout);
+                alertTimeout = setTimeout(() => hideMotionAlert(cameraId), 4000);
+              }
+            });
+          }
+        } else if (!smartDetectionEnabled) {
+          showMotionAlert(cameraId);
+          clearTimeout(alertTimeout);
+          alertTimeout = setTimeout(() => hideMotionAlert(cameraId), 4000);
+        }
       }
     }
     prev = frame.slice();
@@ -920,13 +1025,19 @@ function updateMotionIndicator(cameraId) {
       ind.innerHTML = '<span class="motion-indicator-dot"></span><span class="motion-indicator-text"></span>';
       card.appendChild(ind);
     }
-    ind.querySelector('.motion-indicator-text').textContent = peer.zone ? 'WATCHING ZONE' : 'MOTION ON';
+    const ai = smartDetectionEnabled && cocoModel;
+    let text;
+    if (ai && peer.zone)      text = 'AI · ZONE';
+    else if (ai)              text = 'AI WATCHING';
+    else if (peer.zone)       text = 'WATCHING ZONE';
+    else                      text = 'MOTION ON';
+    ind.querySelector('.motion-indicator-text').textContent = text;
   } else {
     ind?.remove();
   }
 }
 
-function showMotionAlert(cameraId) {
+function showMotionAlert(cameraId, detectedClass) {
   const peer = peers.get(cameraId);
   const card = document.getElementById(`card-${cameraId}`);
   if (!peer || !card) return;
@@ -939,11 +1050,14 @@ function showMotionAlert(cameraId) {
     al.className = 'motion-alert';
     card.appendChild(al);
   }
-  al.textContent = peer.zone ? '⚠ Motion in zone' : '⚠ Motion';
+  const className = detectedClass ? detectedClass.charAt(0).toUpperCase() + detectedClass.slice(1) : null;
+  al.textContent = className
+    ? `⚠ ${className} detected${peer.zone ? ' in zone' : ''}`
+    : (peer.zone ? '⚠ Motion in zone' : '⚠ Motion');
   al.classList.add('visible');
 
   if (motionNotifEnabled) {
-    new Notification(`Motion – ${peer.name || cameraId}`, {
+    new Notification(`${className || 'Motion'} – ${peer.name || cameraId}`, {
       body: new Date().toLocaleTimeString(),
       icon: '/icons/icon-192.png',
       tag: `motion-${cameraId}`,
@@ -1009,6 +1123,7 @@ function startTimelapse(cameraId, cfg) {
 
   tick(); // capture immediately on start
   peer.timelapse.intervalHandle = setInterval(tick, cfg.intervalMs);
+  showToast(`⏱ Timelapse started — ${cfg.mode === 'both' ? 'photos + video' : cfg.mode}`);
 
   if (cfg.durationMs > 0) {
     peer.timelapse.durationTimer = setTimeout(() => {
@@ -1493,17 +1608,22 @@ function openZoneEditor(cameraId) {
       startMotion(cameraId);
       const motionBtn = document.querySelector(`#card-${cameraId} [data-action="motion"]`);
       if (motionBtn) motionBtn.classList.add('active');
-      showToast('🎯 Motion detection enabled');
+      showToast('🔳 Zone set · 🎯 Motion detection enabled');
+    } else if (peer.zone) {
+      updateMotionIndicator(cameraId);
+      showToast('🔳 Zone set');
     } else {
-      updateMotionIndicator(cameraId); // refresh "WATCHING ZONE" vs "MOTION ON" label
+      updateMotionIndicator(cameraId);
     }
   });
   clearBtn.addEventListener('click', e => {
     e.stopPropagation();
+    const had = !!peer.zone;
     peer.zone = null;
     updateZoneOverlay(cameraId);
     updateMotionIndicator(cameraId);
     editor.remove();
+    showToast(had ? '🔳 Zone cleared — watching full frame' : '🔳 Full frame mode');
   });
   cancelBtn.addEventListener('click', e => { e.stopPropagation(); editor.remove(); });
 }
@@ -1660,6 +1780,52 @@ document.getElementById('photoQualitySeg').addEventListener('click', (e) => {
   document.querySelectorAll('#photoQualitySeg .seg-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   photoQuality = btn.dataset.q;
+});
+
+// ── Smart detection (AI) wiring ─────────────────────────────────
+(function buildSmartClassChips() {
+  const container = document.getElementById('smartClassesContainer');
+  if (!container) return;
+  for (const c of SMART_CLASS_OPTIONS) {
+    const chip = document.createElement('button');
+    chip.dataset.value = c.value;
+    chip.textContent = c.label;
+    const on = c.defaultOn === true;
+    if (on) smartClasses.add(c.value);
+    chip.style.cssText = `padding:6px 12px;border:1.5px solid ${on?'#3b82f6':'#334155'};border-radius:18px;background:${on?'rgba(59,130,246,0.15)':'transparent'};color:${on?'#60a5fa':'#f1f5f9'};font-size:13px;font-weight:${on?'700':'400'};cursor:pointer;-webkit-tap-highlight-color:transparent`;
+    chip.addEventListener('click', () => {
+      const isOn = smartClasses.has(c.value);
+      if (isOn) smartClasses.delete(c.value);
+      else      smartClasses.add(c.value);
+      const nowOn = !isOn;
+      chip.style.borderColor = nowOn ? '#3b82f6' : '#334155';
+      chip.style.background  = nowOn ? 'rgba(59,130,246,0.15)' : 'transparent';
+      chip.style.color       = nowOn ? '#60a5fa' : '#f1f5f9';
+      chip.style.fontWeight  = nowOn ? '700' : '400';
+    });
+    container.appendChild(chip);
+  }
+})();
+
+document.getElementById('smartDetectionToggle').addEventListener('click', async function() {
+  smartDetectionEnabled = !smartDetectionEnabled;
+  this.classList.toggle('on', smartDetectionEnabled);
+  document.getElementById('smartDetectionStatusRow').style.display = smartDetectionEnabled ? '' : 'none';
+  document.getElementById('smartClassesRow').style.display        = smartDetectionEnabled ? 'flex' : 'none';
+  if (smartDetectionEnabled) {
+    showToast('🧠 Smart detection enabling…');
+    try {
+      await loadCocoModel();
+      showToast('🧠 AI ready');
+      // Refresh indicator on cameras that have motion on
+      peers.forEach((_, id) => updateMotionIndicator(id));
+    } catch {
+      // already toasted
+    }
+  } else {
+    showToast('Smart detection off');
+    peers.forEach((_, id) => updateMotionIndicator(id));
+  }
 });
 
 // Rename input – enter key
