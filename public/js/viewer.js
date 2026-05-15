@@ -12,6 +12,7 @@ let ws = null;
 let roomId = null;
 let joinURL = null; // full URL camera phones should open (uses LAN IP, not localhost)
 const peers = new Map(); // cameraId → { pc, name, stream, recorder, motion, ... }
+let cameraCounter = 0;
 
 let globalMotion = true;
 let motionSens = 'mid';
@@ -322,7 +323,7 @@ function toggleEmptyState() {
 
 // ── WebRTC signaling ───────────────────────────────────────────
 async function handleOffer({ cameraId, sdp }) {
-  if (!peers.has(cameraId)) onCameraJoined(cameraId, `Camera ${peers.size + 1}`);
+  if (!peers.has(cameraId)) onCameraJoined(cameraId, `Camera ${++cameraCounter}`);
   const peer = peers.get(cameraId);
   // If the pc is not in a state that can accept an offer, recreate it cleanly.
   if (peer.pc.signalingState !== 'stable' && peer.pc.signalingState !== 'have-remote-offer') {
@@ -952,11 +953,7 @@ function startMotion(cameraId) {
   const video = document.querySelector(`#card-${cameraId} .cam-video`);
   if (!peer || !video || peer.motion) return;
 
-  if ('Notification' in window && Notification.permission === 'default') {
-    Notification.requestPermission().then(p => { motionNotifEnabled = p === 'granted'; });
-  } else {
-    motionNotifEnabled = Notification.permission === 'granted';
-  }
+  motionNotifEnabled = 'Notification' in window && Notification.permission === 'granted';
 
   const canvas = document.createElement('canvas');
   canvas.style.display = 'none';
@@ -1737,7 +1734,12 @@ document.querySelectorAll('.panel-backdrop, .panel-close').forEach(el => {
 // ── Header controls ────────────────────────────────────────────
 document.getElementById('layoutBtn').addEventListener('click',  () => openPanel('layoutPanel'));
 document.getElementById('sessionBtn').addEventListener('click', () => openPanel('sessionPanel'));
-document.getElementById('settingsBtn').addEventListener('click',() => openPanel('settingsPanel'));
+document.getElementById('settingsBtn').addEventListener('click', () => {
+  openPanel('settingsPanel');
+  if ('Notification' in window && Notification.permission === 'default') {
+    Notification.requestPermission().then(p => { motionNotifEnabled = p === 'granted'; });
+  }
+});
 
 // Layout selector
 document.getElementById('layoutSeg').addEventListener('click', (e) => {

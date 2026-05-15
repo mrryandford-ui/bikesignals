@@ -23,6 +23,15 @@ self.addEventListener('activate', (e) => {
   );
 });
 
+const CACHE_MAX = 50;
+
+async function trimCache(cache) {
+  const keys = await cache.keys();
+  if (keys.length > CACHE_MAX) {
+    await Promise.all(keys.slice(0, keys.length - CACHE_MAX).map(k => cache.delete(k)));
+  }
+}
+
 self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
   const url = new URL(e.request.url);
@@ -33,9 +42,16 @@ self.addEventListener('fetch', (e) => {
   e.respondWith(
     fetch(e.request)
       .then(res => {
-        if (res.ok) caches.open(CACHE).then(c => c.put(e.request, res.clone()));
+        if (res.ok) {
+          caches.open(CACHE).then(c => { c.put(e.request, res.clone()); trimCache(c); });
+        }
         return res;
       })
-      .catch(() => caches.match(e.request))
+      .catch(() => caches.match(e.request).then(cached =>
+        cached ?? new Response('Offline — open the app while connected to your LAN first.', {
+          status: 503,
+          headers: { 'Content-Type': 'text/plain' },
+        })
+      ))
   );
 });

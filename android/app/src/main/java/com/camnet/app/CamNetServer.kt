@@ -10,8 +10,12 @@ import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import io.ktor.server.websocket.*
 import io.ktor.websocket.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.IOException
@@ -32,11 +36,14 @@ import java.util.concurrent.ConcurrentHashMap
  */
 class CamNetServer(port: Int, private val assets: AssetManager, private val context: android.content.Context) {
 
+    private val cleanupScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     // ── Room state ────────────────────────────────────────────────
     private class Room {
         @Volatile var viewer: DefaultWebSocketSession? = null
         val cameras = ConcurrentHashMap<String, CamRecord>()
         @Volatile var cleanupTimer: Timer? = null
+        val cameraCounter = java.util.concurrent.atomic.AtomicInteger(0)
     }
 
     private class CamRecord(
@@ -81,7 +88,7 @@ class CamNetServer(port: Int, private val assets: AssetManager, private val cont
     )
 
     fun start() { engine.start(wait = false); sslProxy.start(); started = true }
-    fun stop()  { sslProxy.stop(); engine.stop(0, 0); started = false }
+    fun stop()  { sslProxy.stop(); engine.stop(0, 0); cleanupScope.cancel(); started = false }
     val isAlive get() = started
 
     // ── WebSocket session handler ─────────────────────────────────
@@ -148,7 +155,7 @@ class CamNetServer(port: Int, private val assets: AssetManager, private val cont
                     return
                 }
                 val name = msg.optString("cameraName").trim()
-                    .ifEmpty { "Camera ${room.cameras.size + 1}" }
+                    .ifEmpty { "Camera ${room.cameraCounter.incrementAndGet()}" }
                 // Remove stale entry with same camera name
                 room.cameras.entries.firstOrNull { it.value.cameraName == name }?.let { stale ->
                     room.cameras.remove(stale.key)
@@ -199,8 +206,10 @@ class CamNetServer(port: Int, private val assets: AssetManager, private val cont
             t.schedule(object : TimerTask() {
                 override fun run() {
                     if (rooms[rId] === room) {
-                        room.cameras.values.forEach { cam ->
-                            runBlocking { trySend(cam.session, jObj("type" to "viewer-disconnected")) }
+                        cleanupScope.launch {
+                            room.cameras.values.forEach { cam ->
+                                trySend(cam.session, jObj("type" to "viewer-disconnected"))
+                            }
                         }
                         rooms.remove(rId)
                     }

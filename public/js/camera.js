@@ -27,6 +27,7 @@ let torchOn    = false;
 let quality    = 720;
 let wakeLock   = null;
 let wsOpen     = false;
+let mediaBusy  = false;
 
 // ── Recording state ────────────────────────────────────────────
 const CAM_SEGMENT_MS  = 5 * 60 * 1000;
@@ -86,36 +87,42 @@ async function startJoin() {
 
 // ── Media ──────────────────────────────────────────────────────
 async function initMedia() {
-  const q = QUALITY[quality];
-  const video = {
-    facingMode: { ideal: facingMode },
-    width:      { ideal: q.width },
-    height:     { ideal: q.height },
-    frameRate:  { ideal: q.frameRate },
-  };
-  const audio = { echoCancellation: true, noiseSuppression: true };
-
-  if (localStream) localStream.getTracks().forEach(t => t.stop());
-
+  if (mediaBusy) return;
+  mediaBusy = true;
   try {
-    localStream = await navigator.mediaDevices.getUserMedia({ video, audio });
-  } catch {
+    const q = QUALITY[quality];
+    const video = {
+      facingMode: { ideal: facingMode },
+      width:      { ideal: q.width },
+      height:     { ideal: q.height },
+      frameRate:  { ideal: q.frameRate },
+    };
+    const audio = { echoCancellation: true, noiseSuppression: true };
+
+    if (localStream) localStream.getTracks().forEach(t => t.stop());
+
     try {
-      // Specific constraints rejected — try basic audio (device chooses format)
-      localStream = await navigator.mediaDevices.getUserMedia({ video, audio: true });
+      localStream = await navigator.mediaDevices.getUserMedia({ video, audio });
     } catch {
-      // No mic at all — stream video only
-      localStream = await navigator.mediaDevices.getUserMedia({ video, audio: false });
-      micEnabled = false;
-      showToast('Mic unavailable — video only');
+      try {
+        // Specific constraints rejected — try basic audio (device chooses format)
+        localStream = await navigator.mediaDevices.getUserMedia({ video, audio: true });
+      } catch {
+        // No mic at all — stream video only
+        localStream = await navigator.mediaDevices.getUserMedia({ video, audio: false });
+        micEnabled = false;
+        showToast('Mic unavailable — video only');
+      }
     }
+
+    const vid = document.getElementById('localVideo');
+    vid.srcObject = localStream;
+    vid.classList.toggle('mirror', facingMode === 'user');
+
+    sendStatus();
+  } finally {
+    mediaBusy = false;
   }
-
-  const vid = document.getElementById('localVideo');
-  vid.srcObject = localStream;
-  vid.classList.toggle('mirror', facingMode === 'user');
-
-  sendStatus();
 }
 
 // ── WebSocket ──────────────────────────────────────────────────
@@ -155,6 +162,10 @@ function connectWS() {
   ws.onclose = () => {
     wsOpen = false;
     if (!localStream) return; // hangup() / give-up — don't retry
+    if (connectAttempts >= MAX_CONNECT_ATTEMPTS) {
+      giveUpAndReturnToSetup(`Could not reach monitor after ${MAX_CONNECT_ATTEMPTS} attempts`);
+      return;
+    }
     setConnStatus('disconnected', `Reconnecting… (${connectAttempts}/${MAX_CONNECT_ATTEMPTS})`);
     setTimeout(connectWS, 3000);
   };
@@ -414,6 +425,7 @@ function _saveCameraSegment(blob, filename) {
 
 // ── Camera flip ────────────────────────────────────────────────
 async function flipCamera() {
+  if (mediaBusy) return;
   facingMode = facingMode === 'environment' ? 'user' : 'environment';
   document.getElementById('flipBtn').classList.toggle('active', facingMode === 'user');
 
@@ -473,7 +485,7 @@ document.getElementById('qualityBackdrop').addEventListener('click', () => {
 
 document.getElementById('qualityList').addEventListener('click', async (e) => {
   const item = e.target.closest('[data-q]');
-  if (!item) return;
+  if (!item || mediaBusy) return;
   const q = parseInt(item.dataset.q, 10);
   document.querySelectorAll('.quality-item').forEach(i => i.classList.remove('selected'));
   item.classList.add('selected');
