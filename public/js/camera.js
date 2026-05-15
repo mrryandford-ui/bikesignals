@@ -39,10 +39,20 @@ let recordSegNum      = 0;
 let recordBaseName    = '';
 let recordSegTimer    = null;
 
+// ── Connect retry tracking ─────────────────────────────────────
+const MAX_CONNECT_ATTEMPTS = 10; // 10 × 3s = 30s before giving up
+let connectAttempts = 0;
+let giveUpTimer    = null;
+
 // ── Pre-fill room code from URL param ──────────────────────────
 const params = new URLSearchParams(location.search);
 if (params.get('room')) {
   document.getElementById('codeInput').value = params.get('room').toUpperCase();
+  // Came from QR scan or deep link — auto-join after a short delay so the
+  // permission prompt and the page transition feel natural.
+  setTimeout(() => {
+    if (!localStream) startJoin();
+  }, 300);
 }
 
 // ── Join button ────────────────────────────────────────────────
@@ -61,6 +71,8 @@ async function startJoin() {
   hideError();
   setJoinLoading(true);
   roomId = code;
+  // Reset retry state so the 30s give-up window starts fresh from this user action.
+  cancelGiveUpTimer();
   // Create AudioContext here — must be inside a user gesture
   _initAudioCtx();
   try {
@@ -107,7 +119,22 @@ async function initMedia() {
 }
 
 // ── WebSocket ──────────────────────────────────────────────────
+function startGiveUpTimer() {
+  if (giveUpTimer) return; // already running
+  giveUpTimer = setTimeout(
+    () => giveUpAndReturnToSetup('Could not reach the monitor after 30 s. Check that the Monitor app is running and you are on the same Wi-Fi.'),
+    30_000,
+  );
+}
+
+function cancelGiveUpTimer() {
+  clearTimeout(giveUpTimer); giveUpTimer = null;
+  connectAttempts = 0;
+}
+
 function connectWS() {
+  connectAttempts++;
+  startGiveUpTimer();
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   ws = new WebSocket(`${proto}//${location.host}`);
 
@@ -127,11 +154,23 @@ function connectWS() {
 
   ws.onclose = () => {
     wsOpen = false;
-    setConnStatus('disconnected', 'Reconnecting…');
-    if (localStream) setTimeout(connectWS, 3000);
+    if (!localStream) return; // hangup() / give-up — don't retry
+    setConnStatus('disconnected', `Reconnecting… (${connectAttempts}/${MAX_CONNECT_ATTEMPTS})`);
+    setTimeout(connectWS, 3000);
   };
 
   ws.onerror = () => ws.close();
+}
+
+function giveUpAndReturnToSetup(reason) {
+  cancelGiveUpTimer();
+  if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
+  if (wakeLock)    { wakeLock.release().catch(() => {}); wakeLock = null; }
+  stopKeepAlive();
+  try { ws?.close(); } catch {}
+  window.AndroidBridge?.stopStreaming();
+  showSetupScreen();
+  showError(reason);
 }
 
 function wsSend(obj) {
@@ -143,6 +182,7 @@ async function onMessage(msg) {
   switch (msg.type) {
     case 'joined':
       cameraId = msg.cameraId;
+      cancelGiveUpTimer();
       // Reset any recording state left over from a previous session or abrupt disconnect.
       recordActive = false;
       clearTimeout(recordSegTimer); recordSegTimer = null;

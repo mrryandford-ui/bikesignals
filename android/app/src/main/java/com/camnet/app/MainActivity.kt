@@ -66,10 +66,14 @@ class MainActivity : AppCompatActivity() {
 
     // ── Navigation ────────────────────────────────────────────────
     fun showHome() {
+        // Clear back-stack so the Monitor → Back → Camera flow always renders a
+        // fresh screen and never resurrects a stale data:// page from history.
+        webView.clearHistory()
         webView.loadDataWithBaseURL("file:///android_asset/", homeHtml(), "text/html", "UTF-8", null)
     }
 
     fun showSetup() {
+        webView.clearHistory()
         webView.loadDataWithBaseURL("file:///android_asset/", setupHtml(), "text/html", "UTF-8", null)
     }
 
@@ -156,10 +160,10 @@ class MainActivity : AppCompatActivity() {
         </style></head><body>
         <h1>📷 Join Session</h1>
         <p>Scan the QR code on the Monitor phone, or enter the IP manually</p>
-        <button class="outline" id="scanBtn" onclick="startScan()" style="display:none">
+        <button class="outline" id="scanBtn" onclick="startScan()">
           &#x2317;&nbsp; Scan QR Code
         </button>
-        <div class="divider" id="divider" style="display:none">or</div>
+        <div class="divider" id="divider">or</div>
         <div class="row">
           <span class="prefix">https://</span>
           <input id="ip" type="text" inputmode="decimal" value="$lastIp"
@@ -185,12 +189,6 @@ class MainActivity : AppCompatActivity() {
           document.getElementById('ip').focus();
           document.getElementById('backBtn').onclick = function(){ AndroidBridge.resetServer(); };
 
-          // Show scan button only if BarcodeDetector is supported
-          if ('BarcodeDetector' in window) {
-            document.getElementById('scanBtn').style.display = 'block';
-            document.getElementById('divider').style.display = 'flex';
-          }
-
           function connect(){
             var ip = document.getElementById('ip').value.trim().replace(/[\/\s]/g,'');
             if(!ip) return;
@@ -203,6 +201,10 @@ class MainActivity : AppCompatActivity() {
 
           var scanStream = null, scanInterval = null;
           async function startScan() {
+            if (!('BarcodeDetector' in window)) {
+              alert('QR scanning is not supported on this WebView. Enter the IP manually.');
+              return;
+            }
             try {
               scanStream = await navigator.mediaDevices.getUserMedia(
                 {video:{facingMode:'environment',width:{ideal:1280},height:{ideal:720}}}
