@@ -302,6 +302,7 @@ function addCameraCard(cameraId, name) {
       <span class="dot connecting"></span>
       <span class="cam-name" id="name-${cameraId}">${escHtml(name)}</span>
       <span class="latency-badge" style="margin-left:auto">—</span>
+      <button class="cam-menu-btn" data-action="menu" title="Show/hide controls" aria-label="Toggle controls">⋯</button>
     </div>
     <div class="cam-controls">
       <button class="icon-btn" data-action="fullscreen"  title="Fullscreen">⛶</button>
@@ -321,8 +322,13 @@ function addCameraCard(cameraId, name) {
     </div>
   `;
 
-  // Touch: tap to toggle controls visibility on mobile
+  // Touch: tap to toggle controls visibility on mobile, plus the explicit ⋯ menu button.
   card.addEventListener('click', (e) => {
+    if (e.target.closest('[data-action="menu"]')) {
+      card.classList.toggle('show-controls');
+      e.stopPropagation();
+      return;
+    }
     if (e.target.closest('button')) return;
     card.classList.toggle('show-controls');
   });
