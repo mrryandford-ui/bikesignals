@@ -30,9 +30,8 @@ class MainActivity : AppCompatActivity() {
             javaScriptEnabled = true
             domStorageEnabled = true
             mediaPlaybackRequiresUserGesture = false
-            allowFileAccessFromFileURLs = true
-            allowUniversalAccessFromFileURLs = true
-            mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+            mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+            cacheMode = WebSettings.LOAD_NO_CACHE
         }
 
         webView.addJavascriptInterface(
@@ -43,7 +42,12 @@ class MainActivity : AppCompatActivity() {
         webView.webViewClient = object : WebViewClient() {
             @SuppressLint("WebViewClientOnReceivedSslError")
             override fun onReceivedSslError(view: WebView, handler: SslErrorHandler, error: SslError) {
-                handler.proceed()
+                val host = error.url?.let { runCatching { java.net.URL(it).host }.getOrNull() } ?: ""
+                if (isPrivateHost(host)) handler.proceed() else {
+                    handler.cancel()
+                    android.widget.Toast.makeText(this@MainActivity,
+                        "Blocked SSL from untrusted host: $host", android.widget.Toast.LENGTH_LONG).show()
+                }
             }
 
             override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
@@ -58,7 +62,10 @@ class MainActivity : AppCompatActivity() {
         }
 
         webView.webChromeClient = object : WebChromeClient() {
-            override fun onPermissionRequest(request: PermissionRequest) = request.grant(request.resources)
+            override fun onPermissionRequest(request: PermissionRequest) {
+                val host = runCatching { java.net.URI(request.origin.toString()).host }.getOrNull() ?: ""
+                if (isPrivateHost(host)) request.grant(request.resources) else request.deny()
+            }
         }
 
         showHome()
@@ -288,6 +295,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ── Permissions ───────────────────────────────────────────────
+    private fun isPrivateHost(host: String): Boolean {
+        if (host == "localhost" || host == "127.0.0.1") return true
+        val parts = host.split(".").mapNotNull { it.toIntOrNull() }
+        if (parts.size != 4) return false
+        return parts[0] == 10 ||
+            (parts[0] == 172 && parts[1] in 16..31) ||
+            (parts[0] == 192 && parts[1] == 168)
+    }
+
     private fun requestPermissions() {
         val needed = buildList {
             add(Manifest.permission.CAMERA)

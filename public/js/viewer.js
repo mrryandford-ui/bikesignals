@@ -253,7 +253,7 @@ function onCameraJoined(cameraId, name) {
     if (!peer) return;
     if (!peer.stream) peer.stream = e.streams[0];
     else e.streams[0].getTracks().forEach(t => peer.stream.addTrack(t));
-    attachStream(cameraId, e.streams[0]);
+    attachStream(cameraId, peer.stream);
   };
 
   pc.onicecandidate = (e) => {
@@ -312,12 +312,17 @@ async function handleOffer({ cameraId, sdp }) {
     wsSend({ type: 'answer', cameraId, sdp: answer.sdp });
   } catch (e) {
     console.warn('handleOffer failed, retrying with fresh peer:', e);
-    onCameraJoined(cameraId, p.name);
-    const fresh = peers.get(cameraId);
-    await fresh.pc.setRemoteDescription({ type: 'offer', sdp });
-    const answer = await fresh.pc.createAnswer();
-    await fresh.pc.setLocalDescription(answer);
-    wsSend({ type: 'answer', cameraId, sdp: answer.sdp });
+    try {
+      onCameraJoined(cameraId, p.name);
+      const fresh = peers.get(cameraId);
+      await fresh.pc.setRemoteDescription({ type: 'offer', sdp });
+      const answer = await fresh.pc.createAnswer();
+      await fresh.pc.setLocalDescription(answer);
+      wsSend({ type: 'answer', cameraId, sdp: answer.sdp });
+    } catch (e2) {
+      console.error('handleOffer retry also failed:', e2);
+      showToast('Camera reconnect failed');
+    }
   }
 }
 
@@ -1120,6 +1125,11 @@ function startTimelapse(cameraId, cfg) {
       _saveTlPhoto(blob, `${base}${suffix}.jpg`);
     }
     if (cfg.mode === 'video' || cfg.mode === 'both') {
+      if (tl.frames.length >= 1000) {
+        showToast('⚠ Timelapse frame cap reached (1000) — stopping');
+        stopTimelapse(cameraId); return;
+      }
+      if (tl.frames.length === 800) showToast('⚠ Timelapse approaching frame cap (800/1000)');
       tl.frames.push(blob);
     }
     _updateTlIndicator(cameraId);
