@@ -99,6 +99,28 @@ const SMART_CLASS_OPTIONS = [
   { value: 'cat',        label: '🐈 Cat' },
 ];
 
+// ── Settings persistence ───────────────────────────────────────
+const LS = 'camnet.viewer.';
+function lsSave(key, val) {
+  try { localStorage.setItem(LS + key, JSON.stringify(val)); } catch {}
+}
+function lsLoad(key, fallback) {
+  try {
+    const raw = localStorage.getItem(LS + key);
+    return raw !== null ? JSON.parse(raw) : fallback;
+  } catch { return fallback; }
+}
+
+// Rehydrate before any UI renders
+globalMotion          = lsLoad('globalMotion', true);
+motionSens            = lsLoad('motionSens', 'mid');
+muteAll               = lsLoad('muteAll', false);
+mirrorFront           = lsLoad('mirrorFront', true);
+currentLayout         = lsLoad('currentLayout', 'l-auto');
+photoQuality          = lsLoad('photoQuality', '720');
+smartDetectionEnabled = lsLoad('smartDetectionEnabled', false);
+smartClasses          = new Set(lsLoad('smartClasses', ['person']));
+
 function loadScript(src) {
   return new Promise((resolve, reject) => {
     const s = document.createElement('script');
@@ -159,6 +181,7 @@ function connectWS() {
 
   ws.onopen = () => {
     setWsStatus('connected');
+    startPing();
     const saved = sessionStorage.getItem('camnet_room');
     ws.send(JSON.stringify(saved
       ? { type: 'rejoin-room', roomId: saved }
@@ -172,6 +195,7 @@ function connectWS() {
   };
 
   ws.onclose = () => {
+    stopPing();
     setWsStatus('disconnected');
     setTimeout(connectWS, 3000);
   };
@@ -1725,6 +1749,7 @@ document.getElementById('layoutSeg').addEventListener('click', (e) => {
   grid.classList.remove('l-auto','l-1','l-2','l-3');
   grid.classList.add(btn.dataset.layout);
   currentLayout = btn.dataset.layout;
+  lsSave('currentLayout', currentLayout);
   closePanel('layoutPanel');
 });
 
@@ -1743,6 +1768,7 @@ document.getElementById('newSessionBtn').addEventListener('click',  () => {
 document.getElementById('globalMotionToggle').addEventListener('click', function() {
   globalMotion = !globalMotion;
   this.classList.toggle('on', globalMotion);
+  lsSave('globalMotion', globalMotion);
   peers.forEach((_, id) => {
     if (globalMotion) startMotion(id);
     else              stopMotion(id);
@@ -1752,23 +1778,27 @@ document.getElementById('globalMotionToggle').addEventListener('click', function
 document.getElementById('muteAllToggle').addEventListener('click', function() {
   muteAll = !muteAll;
   this.classList.toggle('on', muteAll);
+  lsSave('muteAll', muteAll);
   document.querySelectorAll('.cam-video').forEach(v => v.muted = muteAll);
 });
 
 document.getElementById('mirrorToggle').addEventListener('click', function() {
   mirrorFront = !mirrorFront;
   this.classList.toggle('on', mirrorFront);
+  lsSave('mirrorFront', mirrorFront);
   peers.forEach((_, id) => applyMirror(id));
 });
 
 document.getElementById('motionAutoSnapToggle').addEventListener('click', function() {
   motionAutoSnap = !motionAutoSnap;
   this.classList.toggle('on', motionAutoSnap);
+  lsSave('motionAutoSnap', motionAutoSnap);
 });
 
 document.getElementById('motionFlashToggle').addEventListener('click', function() {
   motionFlash = !motionFlash;
   this.classList.toggle('on', motionFlash);
+  lsSave('motionFlash', motionFlash);
   document.getElementById('motionFlashStillRow').style.display = motionFlash ? '' : 'none';
 });
 
@@ -1778,6 +1808,7 @@ document.getElementById('motionFlashStillSeg').addEventListener('click', (e) => 
   document.querySelectorAll('#motionFlashStillSeg .seg-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   motionFlashStillMins = parseInt(btn.dataset.mins, 10);
+  lsSave('motionFlashStillMins', motionFlashStillMins);
 });
 
 document.getElementById('motionSensSeg').addEventListener('click', (e) => {
@@ -1786,6 +1817,7 @@ document.getElementById('motionSensSeg').addEventListener('click', (e) => {
   document.querySelectorAll('#motionSensSeg .seg-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   motionSens = btn.dataset.sens;
+  lsSave('motionSens', motionSens);
 });
 
 document.getElementById('photoQualitySeg').addEventListener('click', (e) => {
@@ -1794,6 +1826,7 @@ document.getElementById('photoQualitySeg').addEventListener('click', (e) => {
   document.querySelectorAll('#photoQualitySeg .seg-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   photoQuality = btn.dataset.q;
+  lsSave('photoQuality', photoQuality);
 });
 
 // ── Smart detection (AI) wiring ─────────────────────────────────
@@ -1816,6 +1849,7 @@ document.getElementById('photoQualitySeg').addEventListener('click', (e) => {
       chip.style.background  = nowOn ? 'rgba(59,130,246,0.15)' : 'transparent';
       chip.style.color       = nowOn ? '#60a5fa' : '#f1f5f9';
       chip.style.fontWeight  = nowOn ? '700' : '400';
+      lsSave('smartClasses', [...smartClasses]);
     });
     container.appendChild(chip);
   }
@@ -1824,6 +1858,7 @@ document.getElementById('photoQualitySeg').addEventListener('click', (e) => {
 document.getElementById('smartDetectionToggle').addEventListener('click', async function() {
   smartDetectionEnabled = !smartDetectionEnabled;
   this.classList.toggle('on', smartDetectionEnabled);
+  lsSave('smartDetectionEnabled', smartDetectionEnabled);
   document.getElementById('smartDetectionStatusRow').style.display = smartDetectionEnabled ? '' : 'none';
   document.getElementById('smartClassesRow').style.display        = smartDetectionEnabled ? 'flex' : 'none';
   if (smartDetectionEnabled) {
@@ -1904,7 +1939,15 @@ function showQualityPicker(quals, current) {
 }
 
 // ── Latency ping ───────────────────────────────────────────────
-setInterval(() => wsSend({ type: 'ping', ts: Date.now() }), 5000);
+let pingIntervalId = null;
+function startPing() {
+  if (pingIntervalId) return;
+  pingIntervalId = setInterval(() => wsSend({ type: 'ping', ts: Date.now() }), 5000);
+}
+function stopPing() {
+  clearInterval(pingIntervalId);
+  pingIntervalId = null;
+}
 
 // ── Escape key closes panels ───────────────────────────────────
 document.addEventListener('keydown', (e) => {
