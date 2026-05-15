@@ -342,12 +342,14 @@ input[type="text"]::placeholder { color: var(--text-muted); }
 .viewer-header {
   display: flex;
   align-items: center;
-  padding: 10px 14px;
+  padding: 10px 10px;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
   height: 52px;
-  gap: 8px;
+  gap: 6px;
+  overflow: hidden;
+  min-width: 0;
 }
 .header-brand {
   font-size: 16px;
@@ -355,6 +357,8 @@ input[type="text"]::placeholder { color: var(--text-muted); }
   background: linear-gradient(90deg, var(--accent), #a78bfa);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
+  flex-shrink: 1;
+  white-space: nowrap;
 }
 .cam-count-badge {
   background: var(--surface3);
@@ -363,6 +367,9 @@ input[type="text"]::placeholder { color: var(--text-muted); }
   font-weight: 600;
   padding: 3px 8px;
   border-radius: 20px;
+  flex-shrink: 1;
+  min-width: 0;
+  white-space: nowrap;
 }
 .header-spacer { flex: 1; }
 .ws-status {
@@ -371,6 +378,17 @@ input[type="text"]::placeholder { color: var(--text-muted); }
   display: flex;
   align-items: center;
   gap: 4px;
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+#wsStatusText {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.viewer-header .icon-btn {
+  flex-shrink: 0;
 }
 
 /* Feed grid */
@@ -815,11 +833,15 @@ input[type="text"]::placeholder { color: var(--text-muted); }
 }
 .cam-bottom-row {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
-  justify-content: center;
-  gap: 8px;
+  overflow-x: auto;
+  gap: 6px;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  padding-bottom: 2px;
 }
+.cam-bottom-row::-webkit-scrollbar { display: none; }
 .cam-ctrl-btn {
   display: flex;
   flex-direction: column;
@@ -831,8 +853,7 @@ input[type="text"]::placeholder { color: var(--text-muted); }
   color: var(--text-dim);
   font-size: 11px;
   font-weight: 600;
-  flex: 1 0 30%;
-  max-width: 80px;
+  flex: 0 0 auto;
   padding: 10px 6px;
   border-radius: var(--radius-sm);
   transition: color 0.15s, background 0.15s;
