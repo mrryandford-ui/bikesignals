@@ -83,43 +83,77 @@ CamNet is a peer-to-peer multi-phone LAN security camera app. One phone acts as 
 
 ## Known Issues & Fixes
 
-### Fixed (Latest)
-- ✅ **Motion detection silent failure (commit b42d5d9):**
-  - Bug: `smartDetectionEnabled=true` but `cocoModel=null` → neither AI nor basic alert fired
-  - Fix: Changed condition to `!smartDetectionEnabled || !cocoModel` so basic detection fires as fallback
-  - **Status:** Fixed, awaiting user test
-  
-- ✅ **No cancel on camera live screen:**
-  - Added "← Cancel" button to setup screen (shows while loading)
-  - Added "‹" back button to live screen status bar
-  - Both call `hangup()` → return to setup
+### Fixed (Sprint 2 — commit 06fd104)
+- ✅ **MAX_CONNECT_ATTEMPTS not enforced on WS close (camera.js):**
+  - ws.onclose retried indefinitely; now checks `connectAttempts >= MAX_CONNECT_ATTEMPTS` and calls `giveUpAndReturnToSetup` before scheduling next retry
+- ✅ **Camera names recycle after reconnect (CamNetServer.kt + viewer.js):**
+  - Was `cameras.size + 1` — if Camera 1 left, next join got "Camera 1" again, causing name collisions
+  - Fix: `AtomicInteger cameraCounter` on Room (server), `cameraCounter` int in viewer.js
+- ✅ **runBlocking in TimerTask blocks thread pool (CamNetServer.kt):**
+  - Replaced with `cleanupScope.launch {}` (CoroutineScope + SupervisorJob + Dispatchers.IO); scope cancelled in `stop()`
+- ✅ **Service worker no cache cap / bad offline fallback (sw.js):**
+  - Added `trimCache()` (max 50 entries) called after every `cache.put`
+  - Offline fallback now returns a proper 503 Response instead of `undefined`
+- ✅ **mediaBusy races (camera.js):**
+  - `initMedia()` guarded by `mediaBusy` flag with try/finally reset
+  - `flipCamera()` and quality list click bail early when `mediaBusy` is set
+- ✅ **Notification.requestPermission spams per-camera start (viewer.js):**
+  - Moved from `startMotion()` (fires once per camera per session) to `settingsBtn` click handler (fires once total on first settings open)
 
-- ✅ **Camera controls hidden tap zone:**
-  - CSS: `.cam-controls` missing `pointer-events: none` when hidden
-  - Fixed with opacity:0 + pointer-events:none
+### Fixed (Sprint 1 — commit df32d96)
+- ✅ **Android WebView :hover permanently latches camera controls:**
+  - Removed `:hover` from `.cam-controls` visibility rule; controls now show/hide via JS-driven `.show-controls` class only
+- ✅ **Camera bottom controls bar wraps to two rows on narrow phones:**
+  - `.cam-bottom-row`: `flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch`
+- ✅ **Monitor header overflows on small screens:**
+  - Header: `overflow: hidden`; brand/badge/ws-status get `flex-shrink: 1`; icon-btn gets `flex-shrink: 0`; `#wsStatusText` gets `overflow: hidden; text-overflow: ellipsis`
+- ✅ **Inactive camera control buttons invisible (hard to discover):**
+  - `.cam-controls .icon-btn:not(.active) { opacity: 0.55 }`
+- ✅ **Motion detection off by default:**
+  - `globalMotion` default changed `false` → `true`; `attachStream()` always calls `startMotion()`
+- ✅ **Stealth mode not bidirectional (4 bugs):**
+  - Monitor sends `stealth-toggle`; camera toggles enterStealth/exitStealth based on current state; camera reports `stealth` field in `sendStatus()`; monitor tracks `peer.stealth` and keeps 🥷 button `.active`
+- ✅ **Timelapse OOM with unlimited frames:**
+  - Hard cap at 1000 frames; warning toast at 800
+- ✅ **ontrack uses wrong stream (viewer.js):**
+  - `attachStream(cameraId, e.streams[0])` → `attachStream(cameraId, peer.stream)` (merged stream)
+- ✅ **handleOffer retry swallows errors silently:**
+  - Second failure caught with toast: "Camera reconnect failed"
+- ✅ **Settings not persisted across sessions (viewer.js):**
+  - `lsSave`/`lsLoad` helpers with `camnet.viewer.` namespace; all settings (motion, sens, mute, mirror, layout, quality, smart detection, smart classes) rehydrated on load and saved on every change
+- ✅ **Ping interval duplicates if WS reconnects (viewer.js):**
+  - `startPing`/`stopPing` guards; `pingIntervalId` prevents double-interval
+- ✅ **WebView security — SSL and media permissions too permissive (MainActivity.kt):**
+  - `onReceivedSslError`: only `proceed()` for private IPs, otherwise `cancel()` + toast
+  - `onPermissionRequest`: only `grant()` for private-IP origins, otherwise `deny()`
+  - `isPrivateHost()` helper validates RFC1918 + loopback
+  - Removed `allowFileAccessFromFileURLs` / `allowUniversalAccessFromFileURLs`
+  - `mixedContentMode`: `ALWAYS_ALLOW` → `COMPATIBILITY_MODE`; added `LOAD_NO_CACHE`
+- ✅ **network_security_config.xml too broad:**
+  - Replaced wildcard base-config with scoped domain-config blocks for localhost/127.0.0.1 and RFC1918 ranges; base-config now denies cleartext and trusts system certs only
 
-- ✅ **Connection duplicate cards on reconnect:**
-  - `onCameraJoined` was overwriting peer map entry without closing old RTCPeerConnection
-  - Fixed: check existing peer, close + remove DOM card first
-
-- ✅ **QR scanner hidden after Monitor→Back→Camera:**
-  - `BarcodeDetector` in-window check unreliable on second navigation
-  - Fixed: always show button, check inside `startScan()`
-
-- ✅ **Fullscreen button non-functional:**
-  - Native `requestFullscreen()` silently fails on Android WebView (no WebChromeClient.onShowCustomView)
-  - Fixed: CSS `.cam-fullscreen` class (position:fixed, inset:0, z-index:9000)
+### Fixed (Earlier)
+- ✅ **Motion detection silent failure:** `!smartDetectionEnabled || !cocoModel` fallback so basic alert fires when AI model unavailable
+- ✅ **No cancel on camera live screen:** "← Cancel" on setup screen + "‹" back button on live screen, both call `hangup()`
+- ✅ **Camera controls hidden tap zone:** opacity:0 + pointer-events:none on `.cam-controls`
+- ✅ **Connection duplicate cards on reconnect:** `onCameraJoined` closes existing peer before creating new one
+- ✅ **QR scanner hidden after Monitor→Back→Camera:** Check inside `startScan()` not at declaration
+- ✅ **Fullscreen button non-functional:** CSS `.cam-fullscreen` (position:fixed, inset:0, z-index:9000)
 
 ### Testing Checklist
-- [ ] Motion detection fires in both basic and AI modes
+- [ ] Motion detection fires in both basic and AI modes (motion on by default)
+- [ ] Settings persist across app restarts (layout, motion, sens, quality, smart classes)
+- [ ] Stealth mode button stays highlighted on Monitor; 3-tap exits stealth on Camera
+- [ ] Camera name stays stable when camera disconnects and rejoins
+- [ ] Monitor returns Camera to setup after MAX_CONNECT_ATTEMPTS failed retries
+- [ ] Camera bottom bar scrolls horizontally on narrow phones (no wrap)
+- [ ] Notification permission prompt appears on first Settings panel open (not on every motion start)
 - [ ] Cancel button works on setup screen during connection attempt
 - [ ] Back button on live screen returns to setup
-- [ ] Timelapse picker displays correct file size estimates
-- [ ] Photo quality setting applied to snapshots
-- [ ] Smart detection filters by configured object classes
+- [ ] Timelapse warns at 800 frames and stops at 1000
+- [ ] QR scanner accessible after navigating back from live screen
 - [ ] Flash stays on for selected duration after motion
 - [ ] Recording segments at 5 minutes
-- [ ] QR scanner accessible after navigating back from live screen
 
 ---
 
@@ -209,15 +243,14 @@ npm start  # or: node public/server.js
 - **Reconnect:** on WS close, auto-retry every 3s up to 10 attempts (30s total), then give-up timer fires
 - **Recording reset:** on `joined` msg, clear any stale recording state + call `stopCameraRecording()`
 
-### Persistence Gaps
-- Settings not saved across sessions (motion sensitivity, photo quality, smart class toggles, etc.) — could add localStorage
+### Persistence
+- ✅ Monitor settings persisted via `lsSave`/`lsLoad` (namespace `camnet.viewer.`): globalMotion, motionSens, muteAll, mirrorFront, currentLayout, photoQuality, smartDetectionEnabled, smartClasses
 - Camera name optional; no persistent phone identity
 
 ---
 
 ## Future Enhancements (Not Implemented)
 
-- [ ] Persistent settings (localStorage for sensitivity, quality, etc.)
 - [ ] Person detection with face recognition (privacy-local)
 - [ ] Geofencing trigger (location-based alerting)
 - [ ] Custom motion zones per camera (drawn polygons)
