@@ -298,8 +298,12 @@ async function handleCommand({ command, value }) {
     case 'torch-toggle':
       await setTorch(!torchOn);
       break;
-    case 'stealth':
-      enterStealth();
+    case 'stealth-toggle':
+      if (document.getElementById('stealthOverlay').style.display === 'block') {
+        exitStealth();
+      } else {
+        enterStealth();
+      }
       break;
     case 'quality':
       if (QUALITY[value]) {
@@ -524,6 +528,7 @@ function sendStatus() {
     torch: torchOn,
     quality,
     recording: recordActive,
+    stealth: document.getElementById('stealthOverlay').style.display === 'block',
   });
 }
 
@@ -669,12 +674,14 @@ document.getElementById('stealthBtn').addEventListener('click', enterStealth);
 async function enterStealth() {
   document.getElementById('stealthOverlay').style.display = 'block';
   if (!wakeLock) await requestWakeLock();
+  sendStatus();
 }
 
 function exitStealth() {
   stealthTapCount = 0;
   clearTimeout(stealthTapTimer);
   document.getElementById('stealthOverlay').style.display = 'none';
+  sendStatus();
 }
 
 document.getElementById('stealthOverlay').addEventListener('click', () => {

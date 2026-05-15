@@ -526,6 +526,8 @@ input[type="text"]::placeholder { color: var(--text-muted); }
 .cam-controls::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.35); border-radius: 2px; }
 .cam-card.show-controls .cam-controls { opacity: 1; pointer-events: auto; }
 .cam-controls .icon-btn { width: 32px; height: 32px; font-size: 14px; flex-shrink: 0; }
+.cam-controls .icon-btn:not(.active) { opacity: 0.55; }
+.cam-controls .icon-btn:not(.active):hover { opacity: 1; }
 
 /* Card menu toggle — small button in the top bar that opens/closes the controls. */
 .cam-menu-btn {

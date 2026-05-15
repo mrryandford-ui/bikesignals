@@ -13,7 +13,7 @@ let roomId = null;
 let joinURL = null; // full URL camera phones should open (uses LAN IP, not localhost)
 const peers = new Map(); // cameraId → { pc, name, stream, recorder, motion, ... }
 
-let globalMotion = false;
+let globalMotion = true;
 let motionSens = 'mid';
 let muteAll = false;
 let mirrorFront = true;
@@ -265,7 +265,7 @@ function onCameraJoined(cameraId, name) {
     if (pc.iceConnectionState === 'failed') pc.restartIce();
   };
 
-  peers.set(cameraId, { pc, name, stream: null, recorder: null, motion: null, facingMode: null, torchOn: false, quality: 720, recordTarget: null, recDurationMs: 0, recStartTime: 0, recSegNum: 0, recBaseName: '', recChunks: [], recSegTimer: null, recDurationTimer: null, zone: null, lastMotionAt: 0, motionFlashActive: false, motionFlashTimer: null, timelapse: null });
+  peers.set(cameraId, { pc, name, stream: null, recorder: null, motion: null, facingMode: null, torchOn: false, quality: 720, stealth: false, recordTarget: null, recDurationMs: 0, recStartTime: 0, recSegNum: 0, recBaseName: '', recChunks: [], recSegTimer: null, recDurationTimer: null, zone: null, lastMotionAt: 0, motionFlashActive: false, motionFlashTimer: null, timelapse: null });
   addCameraCard(cameraId, name);
   updateCamCount();
 }
@@ -338,7 +338,7 @@ function updateConnState(cameraId, state) {
   if (overlay) overlay.classList.toggle('hidden', state === 'connected');
 }
 
-function onCameraStatus({ cameraId, facingMode, muted, torch, quality: q }) {
+function onCameraStatus({ cameraId, facingMode, muted, torch, quality: q, stealth }) {
   const peer = peers.get(cameraId);
   if (!peer) return;
 
@@ -371,6 +371,11 @@ function onCameraStatus({ cameraId, facingMode, muted, torch, quality: q }) {
     const btn = document.querySelector(`#card-${cameraId} [data-action="quality"]`);
     if (btn) btn.title = `Quality: ${q}p`;
   }
+  if (stealth !== undefined) {
+    peer.stealth = stealth;
+    const btn = document.querySelector(`#card-${cameraId} [data-action="stealth"]`);
+    if (btn) btn.classList.toggle('active', stealth);
+  }
 }
 
 function onPong({ ts }) {
@@ -399,7 +404,7 @@ function attachStream(cameraId, stream) {
     .catch(() => { video.muted = true; return video.play().catch(() => {}); })
     .finally(() => syncMuteBtn(cameraId));
   applyMirror(cameraId);
-  if (globalMotion) startMotion(cameraId);
+  startMotion(cameraId);
 }
 
 function applyMirror(cameraId) {
@@ -566,10 +571,8 @@ async function handleCardAction(cameraId, action, btn) {
     }
 
     case 'stealth':
-      wsSend({ type: 'camera-command', cameraId, command: 'stealth' });
-      btn.classList.add('active');
-      setTimeout(() => btn.classList.remove('active'), 1500);
-      showToast(`Stealth sent to ${peer.name}`);
+      wsSend({ type: 'camera-command', cameraId, command: 'stealth-toggle' });
+      showToast(peer.stealth ? `Stealth OFF on ${peer.name}` : `Stealth ON on ${peer.name}`);
       break;
 
     case 'quality': {
