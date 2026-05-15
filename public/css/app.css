@@ -506,7 +506,6 @@ input[type="text"]::placeholder { color: var(--text-muted); }
 .cam-controls::-webkit-scrollbar { height: 3px; }
 .cam-controls::-webkit-scrollbar-track { background: rgba(255,255,255,0.08); border-radius: 2px; }
 .cam-controls::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.35); border-radius: 2px; }
-.cam-card:hover .cam-controls,
 .cam-card.show-controls .cam-controls { opacity: 1; pointer-events: auto; }
 .cam-controls .icon-btn { width: 32px; height: 32px; font-size: 14px; flex-shrink: 0; }
 
