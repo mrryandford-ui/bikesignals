@@ -632,6 +632,21 @@ input[type="text"]::placeholder { color: var(--text-muted); }
 .cam-card:fullscreen           { border-radius: 0; aspect-ratio: unset; height: 100vh; }
 .cam-card:fullscreen .cam-controls { opacity: 1; }
 
+/* CSS-based fullscreen (reliable across WebView versions). */
+.cam-card.cam-fullscreen {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 9000 !important;
+  border-radius: 0 !important;
+  max-width: none !important;
+  max-height: none !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  aspect-ratio: unset !important;
+}
+.cam-card.cam-fullscreen .cam-video { object-fit: contain; background: #000; }
+.cam-card.cam-fullscreen .cam-controls { opacity: 1; pointer-events: auto; }
+
 /* Latency badge */
 .latency-badge {
   font-size: 9px;

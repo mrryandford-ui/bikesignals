@@ -18,6 +18,59 @@ let motionSens = 'mid';
 let muteAll = false;
 let mirrorFront = true;
 let currentLayout = 'l-auto';
+let photoQuality = '720'; // '480' | '720' | '1080' | 'source'
+
+// ── Rough JPEG + video size tables for picker estimates ────────
+// Values are byte/bit averages — JPEG size varies a lot with scene content.
+const JPEG_BYTES_AT_RES = { 240: 25_000, 480: 75_000, 720: 200_000, 1080: 425_000 };
+const VIDEO_BPS_AT_RES  = { 240: 300_000, 480: 800_000, 720: 1_500_000, 1080: 3_000_000 };
+const JPEG_Q = 0.92;
+
+// Map a photoQuality choice to an effective capture resolution height.
+function resolvePhotoRes(choice, sourceH) {
+  if (choice === 'source' || !choice) return sourceH;
+  const target = parseInt(choice, 10);
+  return Math.min(target, sourceH); // never upscale
+}
+
+// Estimate JPEG bytes at a given height (round to nearest preset bucket).
+function estimateJpegBytes(h) {
+  const buckets = [240, 480, 720, 1080];
+  const r = buckets.find(b => b >= h) || 1080;
+  return JPEG_BYTES_AT_RES[r];
+}
+
+// Capture a JPEG blob from a card's video element, scaled to maxH.
+async function captureVideoFrameJpeg(video, maxH, jpegQ) {
+  if (!video || !video.videoWidth) return null;
+  const srcW = video.videoWidth, srcH = video.videoHeight;
+  const h = Math.min(maxH || srcH, srcH);
+  const w = Math.round(srcW * h / srcH);
+  const canvas = document.createElement('canvas');
+  canvas.width = w; canvas.height = h;
+  canvas.getContext('2d').drawImage(video, 0, 0, w, h);
+  return await new Promise(r => canvas.toBlob(r, 'image/jpeg', jpegQ ?? JPEG_Q));
+}
+
+function formatBytes(b) {
+  if (b == null) return '—';
+  if (b < 1024) return `${b} B`;
+  if (b < 1024 * 1024) return `${Math.round(b / 1024)} KB`;
+  if (b < 1024 * 1024 * 1024) return `${(b / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(b / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+function formatDurationMs(ms) {
+  if (ms >= 3600_000) {
+    const h = ms / 3600_000;
+    return Number.isInteger(h) ? `${h} hr` : `${h.toFixed(1)} hr`;
+  }
+  if (ms >= 60_000) {
+    const m = ms / 60_000;
+    return Number.isInteger(m) ? `${m} min` : `${m.toFixed(1)} min`;
+  }
+  return `${Math.round(ms / 1000)} sec`;
+}
 
 // ── Motion detection sensitivity thresholds ────────────────────
 const SENS = {
@@ -307,8 +360,8 @@ function addCameraCard(cameraId, name) {
     <div class="cam-controls">
       <button class="icon-btn" data-action="fullscreen"  title="Fullscreen">⛶</button>
       <button class="icon-btn" data-action="snapshot"    title="Snapshot">📸</button>
-      <button class="icon-btn" data-action="timelapse"   title="Timelapse">⏱</button>
       <button class="icon-btn" data-action="record"      title="Record">⏺</button>
+      <button class="icon-btn" data-action="timelapse"   title="Timelapse">⏱</button>
       <button class="icon-btn" data-action="mute"        title="Mute">🔊</button>
       <button class="icon-btn" data-action="nightvision" title="Night vision">🌙</button>
       <button class="icon-btn" data-action="motion"      title="Motion detect">👁</button>
@@ -459,34 +512,44 @@ async function handleCardAction(cameraId, action, btn) {
 }
 
 // ── Fullscreen ─────────────────────────────────────────────────
+// CSS-based fullscreen because Android WebView's native fullscreen API
+// requires a custom WebChromeClient.onShowCustomView path that we don't
+// implement. The CSS class works identically on every WebView.
 function toggleFullscreen(cameraId) {
   const card = document.getElementById(`card-${cameraId}`);
   if (!card) return;
-  if (!document.fullscreenElement) {
-    (card.requestFullscreen || card.webkitRequestFullscreen).call(card);
-  } else {
-    (document.exitFullscreen || document.webkitExitFullscreen).call(document);
-  }
+  const goingFull = !card.classList.contains('cam-fullscreen');
+  // Only one card can be fullscreen at a time.
+  document.querySelectorAll('.cam-card.cam-fullscreen').forEach(c => c.classList.remove('cam-fullscreen'));
+  if (goingFull) card.classList.add('cam-fullscreen');
 }
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    document.querySelectorAll('.cam-card.cam-fullscreen').forEach(c => c.classList.remove('cam-fullscreen'));
+  }
+});
 
 // ── Snapshot ───────────────────────────────────────────────────
 function takeSnapshot(cameraId) {
   const video = document.querySelector(`#card-${cameraId} .cam-video`);
   if (!video || !video.videoWidth) return;
+  const targetH = resolvePhotoRes(photoQuality, video.videoHeight);
+  const targetW = Math.round(video.videoWidth * targetH / video.videoHeight);
   const canvas = document.createElement('canvas');
-  canvas.width  = video.videoWidth;
-  canvas.height = video.videoHeight;
+  canvas.width  = targetW;
+  canvas.height = targetH;
   const ctx = canvas.getContext('2d');
   if (video.classList.contains('mirror')) {
     ctx.translate(canvas.width, 0);
     ctx.scale(-1, 1);
   }
-  ctx.drawImage(video, 0, 0);
+  ctx.drawImage(video, 0, 0, targetW, targetH);
 
   const peer     = peers.get(cameraId);
   const name     = (peer?.name || cameraId).replace(/\s+/g, '-');
   const filename = `camnet-${name}-${Date.now()}.jpg`;
-  const dataUrl  = canvas.toDataURL('image/jpeg', 0.92);
+  const dataUrl  = canvas.toDataURL('image/jpeg', JPEG_Q);
 
   // Shutter flash
   const card  = document.getElementById(`card-${cameraId}`);
@@ -948,7 +1011,7 @@ function stopTimelapse(cameraId) {
 
   if ((tl.cfg.mode === 'video' || tl.cfg.mode === 'both') && tl.frames.length > 0) {
     showToast('⏱ Rendering timelapse video…');
-    _renderTlVideo(tl.frames).then(blob => {
+    _renderTlVideo(tl.frames, tl.cfg.videoQuality).then(blob => {
       if (!blob) return;
       const ext = blob.type.includes('mp4') ? 'mp4' : 'webm';
       _saveMonitorSegment(`${tl.base}_timelapse.${ext}`, blob, blob.type);
@@ -957,13 +1020,13 @@ function stopTimelapse(cameraId) {
 }
 
 async function _captureTlFrame(cameraId) {
+  const peer = peers.get(cameraId);
   const video = document.querySelector(`#card-${cameraId} .cam-video`);
   if (!video || !video.videoWidth) return null;
-  const canvas = document.createElement('canvas');
-  canvas.width  = video.videoWidth;
-  canvas.height = video.videoHeight;
-  canvas.getContext('2d').drawImage(video, 0, 0);
-  return new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.88));
+  // Photo quality: if the timelapse cfg overrides it, use that; otherwise global setting.
+  const choice = peer?.timelapse?.cfg?.photoQuality ?? photoQuality;
+  const targetH = resolvePhotoRes(choice, video.videoHeight);
+  return captureVideoFrameJpeg(video, targetH, JPEG_Q);
 }
 
 async function _saveTlPhoto(blob, filename) {
@@ -979,17 +1042,23 @@ async function _saveTlPhoto(blob, filename) {
   }
 }
 
-async function _renderTlVideo(frames) {
+async function _renderTlVideo(frames, videoQualityRes) {
   try {
     const bitmaps = await Promise.all(frames.map(b => createImageBitmap(b)));
+    if (!bitmaps.length) return null;
+    // Output canvas size: scale to videoQualityRes (height-bound), preserving aspect.
+    const srcW = bitmaps[0].width, srcH = bitmaps[0].height;
+    const targetH = Math.min(videoQualityRes || srcH, srcH);
+    const targetW = Math.round(srcW * targetH / srcH);
     const canvas  = document.createElement('canvas');
-    canvas.width  = bitmaps[0].width;
-    canvas.height = bitmaps[0].height;
+    canvas.width  = targetW;
+    canvas.height = targetH;
     const ctx     = canvas.getContext('2d');
     const mimeType = ['video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm']
       .find(m => MediaRecorder.isTypeSupported(m)) || 'video/webm';
     const stream  = canvas.captureStream(24);
-    const rec     = new MediaRecorder(stream, { mimeType });
+    const bps     = VIDEO_BPS_AT_RES[targetH] || VIDEO_BPS_AT_RES[720];
+    const rec     = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: bps });
     const chunks  = [];
     return new Promise(resolve => {
       rec.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
@@ -1001,7 +1070,7 @@ async function _renderTlVideo(frames) {
       let i = 0;
       (function tick() {
         if (i >= bitmaps.length) { rec.stop(); return; }
-        ctx.drawImage(bitmaps[i++], 0, 0);
+        ctx.drawImage(bitmaps[i++], 0, 0, targetW, targetH);
         setTimeout(tick, 1000 / 24);
       })();
     });
@@ -1031,57 +1100,44 @@ function _updateTlIndicator(cameraId) {
   }
 }
 
-function showTimelapsePicker(quality) {
+function showTimelapsePicker(streamQuality) {
   return new Promise(resolve => {
-    const q = quality || 720;
-    const intervals = [
-      { ms: 10_000,     label: '10 sec' },
-      { ms: 30_000,     label: '30 sec' },
-      { ms: 60_000,     label: '1 min', isDefault: true },
-      { ms: 300_000,    label: '5 min' },
-      { ms: 900_000,    label: '15 min' },
-      { ms: 1_800_000,  label: '30 min' },
-      { ms: 3_600_000,  label: '1 hr'  },
-    ];
-    const durations = [
-      { ms: 3_600_000,   label: '1 hr'  },
-      { ms: 14_400_000,  label: '4 hr'  },
-      { ms: 28_800_000,  label: '8 hr', isDefault: true },
-      { ms: 0,           label: '∞'     },
-    ];
-    const modes = [
-      { value: 'photos', label: '📸 Photos only',   isDefault: true },
-      { value: 'video',  label: '🎬 Timelapse video'               },
-      { value: 'both',   label: '📸🎬 Both'                        },
-    ];
+    const streamRes = parseInt(streamQuality, 10) || 720;
 
-    let selInterval = 60_000;
-    let selDuration = 28_800_000;
-    let selMode     = 'photos';
+    // State
+    let selMode      = 'photos';
+    let intervalVal  = 1,   intervalUnit = 'm';  // 1 minute
+    let durationVal  = 8,   durationUnit = 'h';  // 8 hours
+    let unlimited    = false;
+    let useGlobalPhotoQ = true;
+    let localPhotoQ  = photoQuality;
+    let selVideoQ    = String(streamRes);
 
+    const UNIT_SEC = { s: 1, m: 60, h: 3600 };
+
+    // ── Build UI ──────────────────────────────────────────────
     const overlay = document.createElement('div');
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.65);z-index:9998;display:flex;align-items:flex-end;justify-content:center;overflow-y:auto';
     const box = document.createElement('div');
-    box.style.cssText = 'background:#1e293b;border-top:1.5px solid #334155;border-radius:20px 20px 0 0;padding:24px 20px 36px;width:100%;max-width:480px;display:flex;flex-direction:column;gap:14px';
+    box.style.cssText = 'background:#1e293b;border-top:1.5px solid #334155;border-radius:20px 20px 0 0;padding:22px 20px 32px;width:100%;max-width:480px;display:flex;flex-direction:column;gap:12px';
 
     const heading = document.createElement('div');
     heading.textContent = '⏱ Timelapse Options';
     heading.style.cssText = 'color:#f1f5f9;font-size:16px;font-weight:700;text-align:center';
     box.appendChild(heading);
 
-    function makeSection(labelText) {
+    function makeLabel(text) {
       const lbl = document.createElement('div');
-      lbl.textContent = labelText;
-      lbl.style.cssText = 'color:#94a3b8;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px';
-      box.appendChild(lbl);
+      lbl.textContent = text;
+      lbl.style.cssText = 'color:#94a3b8;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;margin-top:4px';
+      return lbl;
     }
 
-    function makeChips(items, getter, setter) {
+    function makeChipsRow(items, initialVal, onChange) {
       const row = document.createElement('div');
-      row.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px';
+      row.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px';
       const btns = new Map();
-      function select(val) {
-        setter(val);
+      function paint(val) {
         btns.forEach((b, k) => {
           const on = k === val;
           b.style.borderColor = on ? '#3b82f6' : '#334155';
@@ -1089,60 +1145,212 @@ function showTimelapsePicker(quality) {
           b.style.color       = on ? '#60a5fa' : '#f1f5f9';
           b.style.fontWeight  = on ? '700' : '400';
         });
-        updateEstimate();
       }
       for (const it of items) {
         const b = document.createElement('button');
         b.textContent = it.label;
-        const on = it.isDefault;
-        b.style.cssText = `padding:8px 14px;border:1.5px solid ${on ? '#3b82f6' : '#334155'};border-radius:20px;background:${on ? 'rgba(59,130,246,0.15)' : 'transparent'};color:${on ? '#60a5fa' : '#f1f5f9'};font-size:14px;font-weight:${on ? '700' : '400'};cursor:pointer;-webkit-tap-highlight-color:transparent`;
-        b.addEventListener('click', () => select(it.ms ?? it.value));
-        btns.set(it.ms ?? it.value, b);
+        b.style.cssText = 'padding:7px 13px;border:1.5px solid #334155;border-radius:18px;background:transparent;color:#f1f5f9;font-size:13px;font-weight:400;cursor:pointer;-webkit-tap-highlight-color:transparent';
+        b.addEventListener('click', () => { paint(it.value); onChange(it.value); });
+        btns.set(it.value, b);
         row.appendChild(b);
       }
-      box.appendChild(row);
-      return btns;
+      paint(initialVal);
+      return row;
     }
 
-    makeSection('Capture Mode');
-    makeChips(modes, () => selMode, v => { selMode = v; });
+    function makeNumberUnitRow(initVal, initUnit, units, onChange) {
+      const wrap = document.createElement('div');
+      wrap.style.cssText = 'display:flex;gap:8px;align-items:stretch';
+      const input = document.createElement('input');
+      input.type = 'number'; input.min = '1'; input.value = String(initVal);
+      input.inputMode = 'numeric';
+      input.style.cssText = 'flex:1;padding:11px 14px;border:1.5px solid #334155;border-radius:10px;background:#0f172a;color:#f1f5f9;font-size:16px;font-weight:600;text-align:center;outline:none;-moz-appearance:textfield';
+      const select = document.createElement('select');
+      select.style.cssText = 'padding:11px 12px;border:1.5px solid #334155;border-radius:10px;background:#0f172a;color:#f1f5f9;font-size:14px;font-weight:500;outline:none;min-width:96px;cursor:pointer';
+      for (const u of units) {
+        const opt = document.createElement('option');
+        opt.value = u.value; opt.textContent = u.label;
+        if (u.value === initUnit) opt.selected = true;
+        select.appendChild(opt);
+      }
+      function emit() {
+        const v = Math.max(1, parseInt(input.value, 10) || 1);
+        onChange(v, select.value);
+      }
+      input.addEventListener('input', emit);
+      select.addEventListener('change', emit);
+      wrap.appendChild(input); wrap.appendChild(select);
+      return wrap;
+    }
 
-    makeSection('Interval');
-    makeChips(intervals, () => selInterval, v => { selInterval = v; });
+    // Mode
+    box.appendChild(makeLabel('Capture Mode'));
+    box.appendChild(makeChipsRow(
+      [
+        { value: 'photos', label: '📸 Photos' },
+        { value: 'video',  label: '🎬 Video' },
+        { value: 'both',   label: '📸🎬 Both' },
+      ],
+      selMode,
+      v => { selMode = v; refreshSections(); updateEstimate(); },
+    ));
 
-    makeSection('Duration');
-    makeChips(durations, () => selDuration, v => { selDuration = v; });
+    // Interval
+    box.appendChild(makeLabel('Interval'));
+    box.appendChild(makeNumberUnitRow(
+      intervalVal, intervalUnit,
+      [{ value: 's', label: 'seconds' }, { value: 'm', label: 'minutes' }, { value: 'h', label: 'hours' }],
+      (v, u) => { intervalVal = v; intervalUnit = u; updateEstimate(); },
+    ));
 
-    // Estimate
+    // Duration + Unlimited
+    box.appendChild(makeLabel('Duration'));
+    const durationWrap = document.createElement('div');
+    durationWrap.style.cssText = 'display:flex;flex-direction:column;gap:8px';
+    const durationRow = makeNumberUnitRow(
+      durationVal, durationUnit,
+      [{ value: 'm', label: 'minutes' }, { value: 'h', label: 'hours' }],
+      (v, u) => { durationVal = v; durationUnit = u; updateEstimate(); },
+    );
+    durationWrap.appendChild(durationRow);
+    const unlimitedLbl = document.createElement('label');
+    unlimitedLbl.style.cssText = 'display:flex;align-items:center;gap:8px;color:#94a3b8;font-size:13px;cursor:pointer;-webkit-tap-highlight-color:transparent;padding:4px 2px';
+    const unlimitedCb = document.createElement('input');
+    unlimitedCb.type = 'checkbox';
+    unlimitedCb.style.cssText = 'width:18px;height:18px;accent-color:#3b82f6';
+    unlimitedCb.addEventListener('change', () => {
+      unlimited = unlimitedCb.checked;
+      durationRow.style.opacity  = unlimited ? '0.4' : '1';
+      durationRow.style.pointerEvents = unlimited ? 'none' : 'auto';
+      updateEstimate();
+    });
+    unlimitedLbl.appendChild(unlimitedCb);
+    unlimitedLbl.appendChild(document.createTextNode('Unlimited (run until manually stopped)'));
+    durationWrap.appendChild(unlimitedLbl);
+    box.appendChild(durationWrap);
+
+    // Photo Quality (conditional on mode)
+    const photoSection = document.createElement('div');
+    photoSection.style.cssText = 'display:flex;flex-direction:column;gap:8px';
+    photoSection.appendChild(makeLabel('Photo Quality'));
+    const globalLbl = document.createElement('label');
+    globalLbl.style.cssText = 'display:flex;align-items:center;gap:8px;color:#cbd5e1;font-size:13px;cursor:pointer;-webkit-tap-highlight-color:transparent';
+    const globalCb = document.createElement('input');
+    globalCb.type = 'checkbox'; globalCb.checked = true;
+    globalCb.style.cssText = 'width:18px;height:18px;accent-color:#3b82f6';
+    const globalText = document.createElement('span');
+    function globalLabelText() {
+      return `Use global setting (${photoQuality === 'source' ? 'Source' : photoQuality + 'p'})`;
+    }
+    globalText.textContent = globalLabelText();
+    globalLbl.appendChild(globalCb); globalLbl.appendChild(globalText);
+    photoSection.appendChild(globalLbl);
+    const photoChips = makeChipsRow(
+      [
+        { value: '480',    label: '480p' },
+        { value: '720',    label: '720p' },
+        { value: '1080',   label: '1080p' },
+        { value: 'source', label: 'Source' },
+      ],
+      localPhotoQ,
+      v => { localPhotoQ = v; updateEstimate(); },
+    );
+    photoSection.appendChild(photoChips);
+    globalCb.addEventListener('change', () => {
+      useGlobalPhotoQ = globalCb.checked;
+      photoChips.style.display = useGlobalPhotoQ ? 'none' : 'flex';
+      globalText.textContent = globalLabelText();
+      updateEstimate();
+    });
+    photoChips.style.display = 'none'; // hidden by default (using global)
+    box.appendChild(photoSection);
+
+    // Video Quality (conditional on mode)
+    const videoSection = document.createElement('div');
+    videoSection.style.cssText = 'display:flex;flex-direction:column;gap:8px';
+    videoSection.appendChild(makeLabel('Video Quality'));
+    videoSection.appendChild(makeChipsRow(
+      [
+        { value: '240',  label: '240p' },
+        { value: '480',  label: '480p' },
+        { value: '720',  label: '720p' },
+        { value: '1080', label: '1080p' },
+      ],
+      selVideoQ,
+      v => { selVideoQ = v; updateEstimate(); },
+    ));
+    box.appendChild(videoSection);
+
+    function refreshSections() {
+      photoSection.style.display = (selMode === 'photos' || selMode === 'both') ? 'flex' : 'none';
+      videoSection.style.display = (selMode === 'video'  || selMode === 'both') ? 'flex' : 'none';
+    }
+    refreshSections();
+
+    // ── Estimate ─────────────────────────────────────────────
     const info = document.createElement('div');
-    info.style.cssText = 'background:#0f172a;border-radius:10px;padding:10px 14px;font-size:12px;color:#64748b;line-height:1.6';
+    info.style.cssText = 'background:#0f172a;border-radius:10px;padding:12px 14px;font-size:12px;color:#94a3b8;line-height:1.55;white-space:pre-line';
     box.appendChild(info);
 
     function updateEstimate() {
-      const totalMins   = selDuration > 0 ? selDuration / 60_000 : null;
-      const intervalMin = selInterval / 60_000;
-      const frames      = totalMins ? Math.round(totalMins / intervalMin) : null;
-      const videoSecs   = frames ? (frames / 24).toFixed(1) : null;
-      let txt = frames
-        ? `${frames.toLocaleString()} captures`
-        : `~${Math.round(60 / intervalMin)}/hr`;
-      if (selMode !== 'photos' && frames)
-        txt += `  →  ${videoSecs}s video at 24fps`;
-      if (selMode !== 'photos' && !frames)
-        txt += `  →  timelapse rendered on stop`;
-      if (frames && frames > 800)
-        txt += '\n⚠ High frame count — video render may take time.';
-      info.textContent = txt;
-      info.style.whiteSpace = 'pre-line';
+      const intervalMs = intervalVal * UNIT_SEC[intervalUnit] * 1000;
+      const durationMs = unlimited ? 0 : durationVal * UNIT_SEC[durationUnit] * 1000;
+      const frames = unlimited ? null : Math.max(1, Math.round(durationMs / intervalMs));
+      const effPhotoH = resolvePhotoRes(useGlobalPhotoQ ? photoQuality : localPhotoQ, streamRes);
+      const effVideoH = Math.min(parseInt(selVideoQ, 10), streamRes);
+
+      const lines = [];
+      if (frames !== null) {
+        lines.push(`${frames.toLocaleString()} captures over ${formatDurationMs(durationMs)} (every ${formatDurationMs(intervalMs)})`);
+      } else {
+        const perHr = Math.round(3600 / (intervalMs / 1000));
+        lines.push(`Unlimited — ${perHr.toLocaleString()} captures/hour at this interval`);
+      }
+
+      let totalBytes = 0;
+      if (selMode === 'photos' || selMode === 'both') {
+        const jpegB = estimateJpegBytes(effPhotoH);
+        if (frames !== null) {
+          const photoB = jpegB * frames;
+          totalBytes += photoB;
+          lines.push(`Photos:  ${formatBytes(photoB)}   (${frames}× ~${formatBytes(jpegB)} at ${effPhotoH}p)`);
+        } else {
+          lines.push(`Photos:  ~${formatBytes(jpegB)} each at ${effPhotoH}p`);
+        }
+      }
+      if (selMode === 'video' || selMode === 'both') {
+        if (frames !== null) {
+          const videoSec   = frames / 24;
+          const videoB     = Math.round(VIDEO_BPS_AT_RES[effVideoH] * videoSec / 8);
+          totalBytes += videoB;
+          lines.push(`Video:   ${formatBytes(videoB)}   (${videoSec.toFixed(1)}s at ${effVideoH}p, 24 fps)`);
+        } else {
+          lines.push(`Video:   rendered on stop at ${effVideoH}p`);
+        }
+      }
+      if (totalBytes > 0 && selMode === 'both') {
+        lines.push(`Total:   ${formatBytes(totalBytes)}`);
+      }
+      if (frames !== null && frames > 800) {
+        lines.push('⚠ High frame count — video render may take a while.');
+      }
+      info.textContent = lines.join('\n');
     }
     updateEstimate();
 
+    // ── Action buttons ──────────────────────────────────────
     const startBtn = document.createElement('button');
     startBtn.textContent = 'Start Timelapse';
-    startBtn.style.cssText = 'padding:15px;background:#3b82f6;color:#fff;border:none;border-radius:12px;font-size:16px;font-weight:700;cursor:pointer;-webkit-tap-highlight-color:transparent';
+    startBtn.style.cssText = 'padding:15px;background:#3b82f6;color:#fff;border:none;border-radius:12px;font-size:16px;font-weight:700;cursor:pointer;-webkit-tap-highlight-color:transparent;margin-top:4px';
     startBtn.addEventListener('click', () => {
       document.body.removeChild(overlay);
-      resolve({ mode: selMode, intervalMs: selInterval, durationMs: selDuration });
+      resolve({
+        mode: selMode,
+        intervalMs: intervalVal * UNIT_SEC[intervalUnit] * 1000,
+        durationMs: unlimited ? 0 : durationVal * UNIT_SEC[durationUnit] * 1000,
+        photoQuality: useGlobalPhotoQ ? null : localPhotoQ, // null = follow global
+        videoQuality: Math.min(parseInt(selVideoQ, 10), streamRes),
+      });
     });
     box.appendChild(startBtn);
 
@@ -1412,6 +1620,14 @@ document.getElementById('motionSensSeg').addEventListener('click', (e) => {
   document.querySelectorAll('#motionSensSeg .seg-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   motionSens = btn.dataset.sens;
+});
+
+document.getElementById('photoQualitySeg').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-q]');
+  if (!btn) return;
+  document.querySelectorAll('#photoQualitySeg .seg-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  photoQuality = btn.dataset.q;
 });
 
 // Rename input – enter key
