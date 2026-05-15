@@ -364,8 +364,8 @@ function addCameraCard(cameraId, name) {
       <button class="icon-btn" data-action="timelapse"   title="Timelapse">⏱</button>
       <button class="icon-btn" data-action="mute"        title="Mute">🔊</button>
       <button class="icon-btn" data-action="nightvision" title="Night vision">🌙</button>
-      <button class="icon-btn" data-action="motion"      title="Motion detect">👁</button>
-      <button class="icon-btn" data-action="zone"        title="Detection zone">🎯</button>
+      <button class="icon-btn" data-action="motion"      title="Motion detection">🎯</button>
+      <button class="icon-btn" data-action="zone"        title="Detection zone">🔳</button>
       <button class="icon-btn" data-action="flip"        title="Flip camera (remote)">🔄</button>
       <button class="icon-btn" data-action="flash"       title="Toggle flash (remote)">🔦</button>
       <button class="icon-btn" data-action="stealth"     title="Stealth mode (remote)">🕵️</button>
@@ -895,6 +895,7 @@ function startMotion(cameraId) {
   }
 
   peer.motion = { stop: () => { running = false; canvas.remove(); clearTimeout(alertTimeout); } };
+  updateMotionIndicator(cameraId);
   analyze();
 }
 
@@ -904,6 +905,25 @@ function stopMotion(cameraId) {
   peer.motion.stop();
   peer.motion = null;
   hideMotionAlert(cameraId);
+  updateMotionIndicator(cameraId);
+}
+
+function updateMotionIndicator(cameraId) {
+  const peer = peers.get(cameraId);
+  const card = document.getElementById(`card-${cameraId}`);
+  if (!card) return;
+  let ind = card.querySelector('.motion-indicator');
+  if (peer?.motion) {
+    if (!ind) {
+      ind = document.createElement('div');
+      ind.className = 'motion-indicator';
+      ind.innerHTML = '<span class="motion-indicator-dot"></span><span class="motion-indicator-text"></span>';
+      card.appendChild(ind);
+    }
+    ind.querySelector('.motion-indicator-text').textContent = peer.zone ? 'WATCHING ZONE' : 'MOTION ON';
+  } else {
+    ind?.remove();
+  }
 }
 
 function showMotionAlert(cameraId) {
@@ -1386,7 +1406,7 @@ function openZoneEditor(cameraId) {
   // Instruction
   const hint = document.createElement('div');
   hint.style.cssText = 'position:absolute;top:10px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.75);color:#f1f5f9;font-size:12px;font-weight:600;padding:5px 12px;border-radius:20px;pointer-events:none;white-space:nowrap;z-index:1';
-  hint.textContent = 'Drag to draw detection zone';
+  hint.textContent = peer.zone ? 'Drag to redraw, or tap Clear Zone' : 'Drag to draw detection zone';
   editor.appendChild(hint);
 
   // Live zone rectangle
@@ -1403,8 +1423,8 @@ function openZoneEditor(cameraId) {
   confirmBtn.style.cssText = 'display:none;padding:8px 18px;background:#3b82f6;color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer';
 
   const clearBtn = document.createElement('button');
-  clearBtn.textContent = 'Full Frame';
-  clearBtn.style.cssText = 'padding:8px 14px;background:rgba(30,41,59,0.9);color:#f1f5f9;border:1.5px solid #475569;border-radius:10px;font-size:13px;cursor:pointer';
+  clearBtn.textContent = peer.zone ? '🗑 Clear Zone' : 'Full Frame';
+  clearBtn.style.cssText = `padding:8px 14px;background:${peer.zone ? '#dc2626' : 'rgba(30,41,59,0.9)'};color:#fff;border:1.5px solid ${peer.zone ? '#dc2626' : '#475569'};border-radius:10px;font-size:13px;font-weight:600;cursor:pointer`;
 
   const cancelBtn = document.createElement('button');
   cancelBtn.textContent = 'Cancel';
@@ -1466,11 +1486,23 @@ function openZoneEditor(cameraId) {
     if (pendingZone) peer.zone = pendingZone;
     updateZoneOverlay(cameraId);
     editor.remove();
+    // Auto-enable motion detection when a zone is confirmed — setting a zone
+    // without enabling motion does nothing visible, which is the most common
+    // "why isn't this working" trap.
+    if (peer.zone && !peer.motion) {
+      startMotion(cameraId);
+      const motionBtn = document.querySelector(`#card-${cameraId} [data-action="motion"]`);
+      if (motionBtn) motionBtn.classList.add('active');
+      showToast('🎯 Motion detection enabled');
+    } else {
+      updateMotionIndicator(cameraId); // refresh "WATCHING ZONE" vs "MOTION ON" label
+    }
   });
   clearBtn.addEventListener('click', e => {
     e.stopPropagation();
     peer.zone = null;
     updateZoneOverlay(cameraId);
+    updateMotionIndicator(cameraId);
     editor.remove();
   });
   cancelBtn.addEventListener('click', e => { e.stopPropagation(); editor.remove(); });
