@@ -104,6 +104,19 @@ function buildQR(url) {
 
 // ── Camera lifecycle ───────────────────────────────────────────
 function onCameraJoined(cameraId, name) {
+  // Clean up any existing entry for this cameraId.
+  // This happens when the viewer's WS reconnects — the server re-announces all
+  // cameras still in the room, so we get camera-joined for IDs already in our map.
+  const existing = peers.get(cameraId);
+  if (existing) {
+    stopMotion(cameraId);
+    stopTimelapse(cameraId);
+    clearTimeout(existing.motionFlashTimer);
+    existing.pc.close();
+    document.getElementById(`card-${cameraId}`)?.remove();
+    peers.delete(cameraId);
+  }
+
   const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
 
   // Prepare to receive video+audio
@@ -162,10 +175,25 @@ function toggleEmptyState() {
 async function handleOffer({ cameraId, sdp }) {
   if (!peers.has(cameraId)) onCameraJoined(cameraId, `Camera ${peers.size + 1}`);
   const peer = peers.get(cameraId);
-  await peer.pc.setRemoteDescription({ type: 'offer', sdp });
-  const answer = await peer.pc.createAnswer();
-  await peer.pc.setLocalDescription(answer);
-  wsSend({ type: 'answer', cameraId, sdp: answer.sdp });
+  // If the pc is not in a state that can accept an offer, recreate it cleanly.
+  if (peer.pc.signalingState !== 'stable' && peer.pc.signalingState !== 'have-remote-offer') {
+    onCameraJoined(cameraId, peer.name); // closes old pc, recreates fresh
+  }
+  const p = peers.get(cameraId);
+  try {
+    await p.pc.setRemoteDescription({ type: 'offer', sdp });
+    const answer = await p.pc.createAnswer();
+    await p.pc.setLocalDescription(answer);
+    wsSend({ type: 'answer', cameraId, sdp: answer.sdp });
+  } catch (e) {
+    console.warn('handleOffer failed, retrying with fresh peer:', e);
+    onCameraJoined(cameraId, p.name);
+    const fresh = peers.get(cameraId);
+    await fresh.pc.setRemoteDescription({ type: 'offer', sdp });
+    const answer = await fresh.pc.createAnswer();
+    await fresh.pc.setLocalDescription(answer);
+    wsSend({ type: 'answer', cameraId, sdp: answer.sdp });
+  }
 }
 
 async function handleIce({ cameraId, candidate }) {

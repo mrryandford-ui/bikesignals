@@ -143,10 +143,15 @@ async function onMessage(msg) {
   switch (msg.type) {
     case 'joined':
       cameraId = msg.cameraId;
+      // Reset any recording state left over from a previous session or abrupt disconnect.
+      recordActive = false;
+      clearTimeout(recordSegTimer); recordSegTimer = null;
+      recorder = null; recordChunks = [];
       setConnStatus('connecting', 'Waiting for viewer…');
       showLiveScreen();
       await requestWakeLock();
       await createPeer();
+      sendStatus(); // let the viewer know current facing/mic/quality immediately
       break;
 
     case 'answer':
@@ -452,6 +457,7 @@ document.getElementById('hangupBtn').addEventListener('click', hangup);
 
 function hangup() {
   exitStealth();
+  stopCameraRecording();
   closePeer();
   if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
   if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
