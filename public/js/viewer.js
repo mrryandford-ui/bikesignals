@@ -988,7 +988,8 @@ function startMotion(cameraId) {
               }
             });
           }
-        } else if (!smartDetectionEnabled) {
+        } else if (!smartDetectionEnabled || !cocoModel) {
+          // Fire basic alert when AI is off, OR when AI is on but model hasn't loaded yet.
           showMotionAlert(cameraId);
           clearTimeout(alertTimeout);
           alertTimeout = setTimeout(() => hideMotionAlert(cameraId), 4000);

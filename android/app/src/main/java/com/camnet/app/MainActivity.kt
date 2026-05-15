@@ -101,7 +101,20 @@ class MainActivity : AppCompatActivity() {
           .secondary{background:#1e293b;color:#f1f5f9;border:1.5px solid #334155}
           .divider{width:100%;border:none;border-top:1px solid #1e293b;margin:4px 0}
           .hint{color:#475569;font-size:12px;text-align:center;line-height:1.6}
+          .logo{width:72px;height:72px;background:#090910;border-radius:20px;display:flex;align-items:center;justify-content:center;margin-bottom:4px;box-shadow:0 0 40px rgba(59,130,246,0.3)}
         </style></head><body>
+        <div class="logo">
+          <svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 108 108' width='72' height='72'>
+            <circle cx='44' cy='54' r='20' fill='#3B82F6'/>
+            <circle cx='44' cy='54' r='15' fill='#090910'/>
+            <circle cx='44' cy='54' r='9'  fill='#3B82F6'/>
+            <circle cx='44' cy='54' r='4'  fill='#090910'/>
+            <path d='M28,43 Q33,36 41,39 Q36,45 34,51 Z' fill='#FFFFFF' fill-opacity='0.45'/>
+            <path d='M67,41 A26,26,0,0,1,67,67' stroke='#FFFFFF' stroke-width='4.5' stroke-linecap='round' fill='none'/>
+            <path d='M71,39 A31,31,0,0,1,71,69' stroke='#FFFFFF' stroke-width='4.5' stroke-linecap='round' fill='none'/>
+            <path d='M75,36 A36,36,0,0,1,75,72' stroke='#FFFFFF' stroke-width='4.5' stroke-linecap='round' fill='none'/>
+          </svg>
+        </div>
         <h1>CamNet</h1>
         <p class="tagline">Multi-phone security camera</p>
         <button class="btn primary"   onclick="AndroidBridge.startMonitor()">🖥&nbsp; Monitor</button>

@@ -39,6 +39,9 @@
       <button class="btn btn-success" id="joinBtn" style="width:100%;margin-top:4px;">
         Join →
       </button>
+      <button class="btn btn-ghost" id="cancelJoinBtn" style="display:none;width:100%;margin-top:4px;">
+        ← Cancel
+      </button>
     </div>
   </div>
 
@@ -48,6 +51,7 @@
       <video id="localVideo" autoplay playsinline muted></video>
 
       <div class="live-status-bar">
+        <button class="icon-btn" id="backBtn" title="Back to setup" style="background:transparent;color:rgba(255,255,255,0.7);font-size:20px;width:32px;height:32px;">‹</button>
         <span class="live-badge">LIVE</span>
         <span class="live-room" id="liveRoomCode">------</span>
         <div class="live-conn-status">

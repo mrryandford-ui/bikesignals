@@ -558,10 +558,23 @@ if (window.AndroidBridge) {
 }
 
 function setJoinLoading(loading) {
-  const btn = document.getElementById('joinBtn');
-  btn.disabled = loading;
-  btn.textContent = loading ? 'Connecting…' : 'Join →';
+  const btn    = document.getElementById('joinBtn');
+  const cancel = document.getElementById('cancelJoinBtn');
+  btn.disabled       = loading;
+  btn.textContent    = loading ? 'Connecting…' : 'Join →';
+  cancel.style.display = loading ? '' : 'none';
 }
+
+function cancelJoin() {
+  cancelGiveUpTimer();
+  if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
+  try { ws?.close(); } catch {}
+  setJoinLoading(false);
+  hideError();
+}
+
+document.getElementById('cancelJoinBtn').addEventListener('click', cancelJoin);
+document.getElementById('backBtn').addEventListener('click', hangup);
 
 function showError(msg) {
   const el = document.getElementById('errorMsg');
