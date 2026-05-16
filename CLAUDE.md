@@ -111,6 +111,14 @@ CamNet is a peer-to-peer multi-phone LAN security camera app. One phone acts as 
 - ✅ **No way to reset persisted settings (viewer.js + viewer.html):**
   - "Reset to defaults" button at bottom of settings panel. Confirms, then clears all `camnet.viewer.*` localStorage keys and reloads.
 
+### Fixed (v1.61 — Samsung cleartext final fix)
+- ✅ **ERR_CLEARTEXT_NOT_PERMITTED on Samsung Android 14 — definitive fix (AndroidBridge.kt `startMonitor()`):**
+  - Root cause: Samsung's WebView sandbox blocks `http://localhost` even as a `loadDataWithBaseURL` base URL — no HTTP to localhost is safe on Samsung Android 14.
+  - Fix: Stop using HTTP entirely. SslProxy already serves HTTPS on port 3443. Poll success branch now calls `loadUrl("https://localhost:3443/viewer.html")` directly. Socket probe switched to SSL_PORT so the poll confirms the full stack (SslProxy + Ktor) is ready.
+  - `localhost` was already in `isPrivateHost()` → `onReceivedSslError` already calls `handler.proceed()` for the self-signed cert.
+- ✅ **`onReceivedError` diagnostics (MainActivity.kt):**
+  - Now logs URL + error code to `crash_report.txt` so "Share crash report" shows exactly what failed. Toast also shows the error code.
+
 ### Fixed (v1.60 — post-Samsung field testing)
 - ✅ **ERR_CLEARTEXT_NOT_PERMITTED on Samsung Android 14 (AndroidBridge.kt `startMonitor()`):**
   - Root cause: Samsung's WebView sandbox rejects the base URL passed to `loadDataWithBaseURL` even though no real network request is made — fires `onReceivedError` immediately, calling `showHome()` before the server poll completes.
@@ -364,4 +372,4 @@ camnet/
 
 ---
 
-**Last Updated:** May 2026 (v1.60 — Samsung cleartext fix, crash reporter, ZeroPoint IT branding, version display)
+**Last Updated:** May 2026 (v1.61 — Samsung HTTPS-only Monitor load, onReceivedError diagnostics)
