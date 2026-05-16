@@ -115,7 +115,7 @@ class AndroidBridge(
                 </body></html>
             """.trimIndent()
             activity.webView.loadDataWithBaseURL(
-                "http://localhost:$port/", spinner, "text/html", "UTF-8", null
+                "file:///android_asset/", spinner, "text/html", "UTF-8", null
             )
         }
 
@@ -123,8 +123,22 @@ class AndroidBridge(
         thread(isDaemon = true, name = "camnet-server-poll") {
             repeat(40) {
                 if (SignalingService.isRunning()) {
+                    val html = try {
+                        activity.assets.open("public/viewer.html")
+                            .bufferedReader().use { it.readText() }
+                    } catch (e: Exception) {
+                        android.util.Log.e("CamNet", "Failed to read viewer.html: $e")
+                        activity.runOnUiThread { activity.showHome() }
+                        return@thread
+                    }
                     activity.runOnUiThread {
-                        activity.webView.loadUrl("http://localhost:$port/viewer.html")
+                        activity.webView.loadDataWithBaseURL(
+                            "http://localhost:$port/",
+                            html,
+                            "text/html",
+                            "UTF-8",
+                            null
+                        )
                     }
                     return@thread
                 }
