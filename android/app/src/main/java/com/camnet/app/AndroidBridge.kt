@@ -154,17 +154,6 @@ class AndroidBridge(
     }
 
     /**
-     * Called from the home screen "Camera (this phone)" button when the
-     * embedded server is already running here — loads camera.html from localhost.
-     */
-    @JavascriptInterface
-    fun startLocalCamera() {
-        (context as? MainActivity)?.runOnUiThread {
-            onLoadUrl("http://localhost:${SignalingService.PORT}/camera.html")
-        }
-    }
-
-    /**
      * Called from camera.js saveCameraRecording(). Decodes the base64 video data URL
      * and saves it to DCIM/CamNet in the device gallery via MediaStore.
      */

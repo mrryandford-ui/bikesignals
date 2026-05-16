@@ -83,6 +83,17 @@ CamNet is a peer-to-peer multi-phone LAN security camera app. One phone acts as 
 
 ## Known Issues & Fixes
 
+### Fixed (Post-sprint regression fixes)
+- ✅ **ERR_CLEARTEXT_NOT_PERMITTED on Monitor start (network_security_config.xml):**
+  - Root cause: IP addresses are not valid `<domain>` elements in Android NSC — they are silently ignored, so the RFC1918 domain-config blocks did nothing. `http://localhost:3000/` hit the `base-config` (cleartext denied) and bounced back to home.
+  - Fix: Remove all IP-based domain-config blocks. Use a single `<domain-config>` for `localhost` (cleartext + system+user trust). `base-config` keeps cleartext denied but now includes user certs; LAN SSL errors are handled in code via `isPrivateHost()` → `handler.proceed()`.
+- ✅ **QR scanner "Camera access denied" (MainActivity.kt onPermissionRequest):**
+  - Root cause: Setup screen loads via `loadDataWithBaseURL("file:///android_asset/")`. The resulting `getUserMedia` call arrives with origin `"file://"` or `"null"` — neither passes `isPrivateHost()` — so the camera was denied.
+  - Fix: `onPermissionRequest` now grants requests from `file://`, `data:`, `"null"`, or empty origins (all are local/asset-loaded pages) in addition to private-IP hosts.
+- ✅ **"Camera (also this phone)" phantom button (MainActivity.kt + AndroidBridge.kt):**
+  - Root cause: Server stayed running after `ERR_CLEARTEXT_NOT_PERMITTED` bounce; `homeHtml()` rendered the third button. Once Bug 1 is fixed the button stops appearing, but the UX is inherently confusing (tapping it swaps Monitor UI for Camera UI on the same device).
+  - Fix: Removed `serverRunning`/`localCameraBtn` from `homeHtml()`. Removed `startLocalCamera()` from `AndroidBridge.kt`. Home screen always shows exactly 2 buttons.
+
 ### Fixed (Sprint 2 — commit 06fd104)
 - ✅ **MAX_CONNECT_ATTEMPTS not enforced on WS close (camera.js):**
   - ws.onclose retried indefinitely; now checks `connectAttempts >= MAX_CONNECT_ATTEMPTS` and calls `giveUpAndReturnToSetup` before scheduling next retry

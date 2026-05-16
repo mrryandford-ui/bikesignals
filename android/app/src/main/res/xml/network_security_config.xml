@@ -1,28 +1,30 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <!-- Localhost: always trusted (Monitor WebView loads from here) -->
+    <!--
+      Localhost: cleartext HTTP required for the embedded Ktor server
+      (monitor loads viewer.html via http://localhost:3000/).
+      Android does support "localhost" as a domain name here.
+    -->
     <domain-config cleartextTrafficPermitted="true">
         <domain includeSubdomains="false">localhost</domain>
-        <domain includeSubdomains="false">127.0.0.1</domain>
         <trust-anchors>
             <certificates src="system" />
             <certificates src="user" />
         </trust-anchors>
     </domain-config>
-    <!-- RFC1918 private LAN ranges: allow cleartext + self-signed certs -->
-    <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="true">10.0.0.0</domain>
-        <domain includeSubdomains="true">172.16.0.0</domain>
-        <domain includeSubdomains="true">192.168.0.0</domain>
-        <trust-anchors>
-            <certificates src="system" />
-            <certificates src="user" />
-        </trust-anchors>
-    </domain-config>
-    <!-- Everything else: system trust only, no cleartext -->
+
+    <!--
+      Everything else (LAN IPs like 192.168.x.x, 10.x.x.x):
+      No cleartext — camera phones always connect via HTTPS (port 3443,
+      SslProxy). Self-signed cert errors are handled programmatically
+      in onReceivedSslError -> isPrivateHost() check -> handler.proceed().
+      User certs included so the self-signed cert can optionally be
+      manually trusted via device settings too.
+    -->
     <base-config cleartextTrafficPermitted="false">
         <trust-anchors>
             <certificates src="system" />
+            <certificates src="user" />
         </trust-anchors>
     </base-config>
 </network-security-config>
