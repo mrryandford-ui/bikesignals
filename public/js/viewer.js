@@ -7,7 +7,8 @@ const ICE_SERVERS = [];
 // ── State ──────────────────────────────────────────────────────
 let ws = null;
 let roomId = null;
-let joinURL = null; // full URL camera phones should open (uses LAN IP, not localhost)
+let joinURL = null;    // camera join URL (LAN IP, SSL port)
+let monitorURL = null; // monitor rejoin URL (HTTP port, viewer.html?room=)
 const peers = new Map(); // cameraId → { pc, name, stream, recorder, motion, ... }
 let cameraCounter = 0;
 
@@ -187,7 +188,8 @@ function connectWS() {
   ws.onopen = () => {
     setWsStatus('connected');
     startPing();
-    const saved = sessionStorage.getItem('camnet_room');
+    const urlRoom = new URLSearchParams(location.search).get('room')?.toUpperCase().trim() || null;
+    const saved = urlRoom || localStorage.getItem('camnet_room');
     ws.send(JSON.stringify(saved
       ? { type: 'rejoin-room', roomId: saved }
       : { type: 'create-room' }
@@ -236,11 +238,12 @@ async function onMessage(msg) {
 // ── Room created ───────────────────────────────────────────────
 function onRoomCreated(id) {
   roomId = id;
-  sessionStorage.setItem('camnet_room', id);
+  localStorage.setItem('camnet_room', id);
   const ip      = window._lanIP;
   const sslPort = window._sslPort || 3443;
   const base    = ip ? `https://${ip}:${sslPort}` : location.origin;
-  joinURL = `${base}/?room=${id}`;
+  joinURL    = `${base}/?room=${id}`;
+  monitorURL = `${location.origin}/viewer.html?room=${id}`;
 
   document.getElementById('roomCode').textContent = id;
   document.getElementById('panelRoomCode').textContent = id;
@@ -1769,13 +1772,14 @@ document.getElementById('layoutSeg').addEventListener('click', (e) => {
 });
 
 // Session panel actions
-document.getElementById('copyCodeBtn').addEventListener('click',    () => copyToClipboard(roomId, 'Code copied!'));
-document.getElementById('copyLinkBtn').addEventListener('click',    () => copyToClipboard(joinURL, 'Link copied!'));
-document.getElementById('panelCopyCode').addEventListener('click',  () => copyToClipboard(roomId, 'Code copied!'));
-document.getElementById('panelCopyLink').addEventListener('click',  () => copyToClipboard(joinURL, 'Link copied!'));
+document.getElementById('copyCodeBtn').addEventListener('click',       () => copyToClipboard(roomId, 'Code copied!'));
+document.getElementById('copyLinkBtn').addEventListener('click',       () => copyToClipboard(joinURL, 'Camera link copied!'));
+document.getElementById('panelCopyCode').addEventListener('click',     () => copyToClipboard(roomId, 'Code copied!'));
+document.getElementById('panelCopyLink').addEventListener('click',     () => copyToClipboard(joinURL, 'Camera link copied!'));
+document.getElementById('panelCopyMonitorLink').addEventListener('click', () => copyToClipboard(monitorURL, 'Monitor link copied!'));
 document.getElementById('newSessionBtn').addEventListener('click',  () => {
   closePanel('sessionPanel');
-  sessionStorage.removeItem('camnet_room'); // prevent stale room rejoin on next page load
+  localStorage.removeItem('camnet_room');
   wsSend({ type: 'create-room' });
   peers.forEach((_, id) => onCameraLeft(id));
 });
