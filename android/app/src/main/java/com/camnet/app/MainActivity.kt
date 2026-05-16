@@ -2,6 +2,7 @@ package com.camnet.app
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.http.SslError
 import android.os.Build
@@ -10,6 +11,7 @@ import android.view.View
 import android.view.WindowInsets
 import android.view.WindowInsetsController
 import android.webkit.*
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -22,6 +24,7 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        setupCrashReporter()
         requestPermissions()
 
         webView = WebView(this).also { setContentView(it) }
@@ -79,7 +82,55 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        checkAndOfferCrashReport()
         showHome()
+    }
+
+    // ── Crash reporting ───────────────────────────────────────────
+    private fun setupCrashReporter() {
+        val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            try {
+                val pkgInfo = packageManager.getPackageInfo(packageName, 0)
+                val versionName = pkgInfo.versionName ?: "?"
+                val versionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P)
+                    pkgInfo.longVersionCode else @Suppress("DEPRECATION") pkgInfo.versionCode.toLong()
+                val report = buildString {
+                    appendLine("CamNet Crash Report")
+                    appendLine("===================")
+                    appendLine("Version : $versionName ($versionCode)")
+                    appendLine("Device  : ${Build.MANUFACTURER} ${Build.MODEL}")
+                    appendLine("Android : ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
+                    appendLine("Time    : ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss z", java.util.Locale.US).format(java.util.Date())}")
+                    appendLine("Thread  : ${thread.name}")
+                    appendLine()
+                    appendLine(throwable.stackTraceToString())
+                }
+                java.io.File(filesDir, "crash_report.txt").writeText(report)
+            } catch (_: Exception) {}
+            defaultHandler?.uncaughtException(thread, throwable)
+                ?: android.os.Process.killProcess(android.os.Process.myPid())
+        }
+    }
+
+    private fun checkAndOfferCrashReport() {
+        val crashFile = java.io.File(filesDir, "crash_report.txt")
+        if (!crashFile.exists()) return
+        val report = try { crashFile.readText() } catch (_: Exception) { crashFile.delete(); return }
+        AlertDialog.Builder(this)
+            .setTitle("CamNet crashed")
+            .setMessage("The app crashed last session. Share a report?")
+            .setPositiveButton("Share") { _, _ ->
+                val intent = Intent(Intent.ACTION_SEND).apply {
+                    type = "text/plain"
+                    putExtra(Intent.EXTRA_SUBJECT, "CamNet Crash Report")
+                    putExtra(Intent.EXTRA_TEXT, report)
+                }
+                startActivity(Intent.createChooser(intent, "Share crash report"))
+                crashFile.delete()
+            }
+            .setNegativeButton("Dismiss") { _, _ -> crashFile.delete() }
+            .show()
     }
 
     // ── Navigation ────────────────────────────────────────────────
