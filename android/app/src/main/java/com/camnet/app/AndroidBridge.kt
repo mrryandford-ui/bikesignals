@@ -123,26 +123,13 @@ class AndroidBridge(
         thread(isDaemon = true, name = "camnet-server-poll") {
             repeat(40) {
                 if (SignalingService.isRunning()) {
-                    val html = try {
-                        activity.assets.open("public/viewer.html")
-                            .bufferedReader().use { it.readText() }
-                    } catch (e: Exception) {
-                        android.util.Log.e("CamNet", "Failed to read viewer.html: $e")
-                        activity.runOnUiThread { activity.showHome() }
-                        return@thread
-                    }
+                    val sslPort = CamNetServer.SSL_PORT
                     activity.runOnUiThread {
-                        activity.webView.loadDataWithBaseURL(
-                            "http://localhost:$port/",
-                            html,
-                            "text/html",
-                            "UTF-8",
-                            null
-                        )
+                        activity.webView.loadUrl("https://localhost:$sslPort/viewer.html")
                     }
                     return@thread
                 }
-                try { java.net.Socket("127.0.0.1", port).use {} } catch (_: Exception) {}
+                try { java.net.Socket("127.0.0.1", CamNetServer.SSL_PORT).use {} } catch (_: Exception) {}
                 Thread.sleep(500)
             }
             // Server never came up — show a useful error

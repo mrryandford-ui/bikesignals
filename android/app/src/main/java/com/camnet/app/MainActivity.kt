@@ -55,10 +55,17 @@ class MainActivity : AppCompatActivity() {
 
             override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
                 if (!request.isForMainFrame) return
-                val desc = error.description?.toString() ?: "unknown error"
+                val url  = request.url?.toString() ?: "unknown"
+                val code = error.errorCode
+                val desc = error.description?.toString() ?: "unknown"
+                android.util.Log.e("CamNet", "WebView main frame error: $code $desc — $url")
+                try {
+                    val entry = "[${java.time.LocalDateTime.now()}] WebView error $code: $desc\nURL: $url\n\n"
+                    java.io.File(filesDir, "crash_report.txt").appendText(entry)
+                } catch (_: Exception) {}
                 runOnUiThread {
                     android.widget.Toast.makeText(this@MainActivity,
-                        "Connection failed: $desc", android.widget.Toast.LENGTH_LONG).show()
+                        "Load failed ($code): $desc", android.widget.Toast.LENGTH_LONG).show()
                     showHome()
                 }
             }
