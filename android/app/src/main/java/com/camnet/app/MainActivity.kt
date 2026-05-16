@@ -97,6 +97,9 @@ class MainActivity : AppCompatActivity() {
 
     // ── Home screen ───────────────────────────────────────────────
     private fun homeHtml(): String {
+        val versionName = try {
+            packageManager.getPackageInfo(packageName, 0).versionName ?: "1.0"
+        } catch (e: Exception) { "1.0" }
         return """
         <!DOCTYPE html><html><head>
         <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
@@ -116,6 +119,10 @@ class MainActivity : AppCompatActivity() {
           .divider{width:100%;border:none;border-top:1px solid #1e293b;margin:4px 0}
           .hint{color:#475569;font-size:12px;text-align:center;line-height:1.6}
           .logo{width:72px;height:72px;background:#090910;border-radius:20px;display:flex;align-items:center;justify-content:center;margin-bottom:4px;box-shadow:0 0 40px rgba(59,130,246,0.3)}
+          .footer{position:fixed;bottom:20px;left:0;right:0;display:flex;flex-direction:column;
+                  align-items:center;gap:3px}
+          .version{color:#334155;font-size:11px;font-weight:600;letter-spacing:0.5px}
+          .copyright{color:#1e293b;font-size:10px;letter-spacing:0.3px}
         </style></head><body>
         <div class="logo">
           <svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 108 108' width='72' height='72'>
@@ -135,6 +142,10 @@ class MainActivity : AppCompatActivity() {
         <button class="btn secondary" onclick="AndroidBridge.showCameraSetup()">📷&nbsp; Camera</button>
         <hr class="divider">
         <p class="hint">Monitor: start the server &amp; watch feeds<br>Camera: stream this phone to a Monitor</p>
+        <div class="footer">
+          <span class="version">v$versionName</span>
+          <span class="copyright">&copy; 2026 ZeroPoint IT &middot; All rights reserved</span>
+        </div>
         </body></html>
         """.trimIndent()
     }
