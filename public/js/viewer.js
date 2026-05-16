@@ -1,11 +1,8 @@
 'use strict';
 
-const ICE_SERVERS = [
-  { urls: 'stun:stun.l.google.com:19302' },
-  { urls: 'stun:stun1.l.google.com:19302' },
-  { urls: 'stun:stun2.l.google.com:19302' },
-  { urls: 'stun:stun.cloudflare.com:3478' },
-];
+// LAN-first: host candidates are sufficient for same-subnet WebRTC.
+// Camera drives STUN fallback via createPeer() retry; viewer just handles new offers.
+const ICE_SERVERS = [];
 
 // ── State ──────────────────────────────────────────────────────
 let ws = null;
@@ -122,10 +119,13 @@ photoQuality          = lsLoad('photoQuality', '720');
 smartDetectionEnabled = lsLoad('smartDetectionEnabled', false);
 smartClasses          = new Set(lsLoad('smartClasses', ['person']));
 
-function loadScript(src) {
+function loadScript(src, { integrity, crossOrigin } = {}) {
   return new Promise((resolve, reject) => {
     const s = document.createElement('script');
-    s.src = src; s.async = true;
+    s.src   = src;
+    s.async = true;
+    if (crossOrigin) s.crossOrigin = crossOrigin;
+    if (integrity)   s.integrity   = integrity;
     s.onload  = () => resolve();
     s.onerror = () => reject(new Error('Failed to load ' + src));
     document.head.appendChild(s);
@@ -138,11 +138,15 @@ async function loadCocoModel() {
   cocoLoadingPromise = (async () => {
     updateSmartStatus('Loading TensorFlow…');
     if (!window.tf) {
-      await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.21.0/dist/tf.min.js');
+      // integrity hash: run `openssl dgst -sha384 -binary tf.min.js | openssl base64 -A` to compute
+      await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.21.0/dist/tf.min.js',
+        { crossOrigin: 'anonymous' });
     }
     updateSmartStatus('Loading detection model…');
     if (!window.cocoSsd) {
-      await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js');
+      // integrity hash: run `openssl dgst -sha384 -binary coco-ssd.min.js | openssl base64 -A` to compute
+      await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js',
+        { crossOrigin: 'anonymous' });
     }
     updateSmartStatus('Warming up…');
     cocoModel = await window.cocoSsd.load({ base: 'lite_mobilenet_v2' });
@@ -738,12 +742,15 @@ function _startMonitorSegment(cameraId) {
     rec.ondataavailable = e => { if (e.data.size) peer.recChunks.push(e.data); };
     rec.onstop = () => {
       if (peer.recChunks.length > 0) {
-        const blob = new Blob(peer.recChunks, { type: rec.mimeType });
-        peer.recChunks = [];
+        const blob   = new Blob(peer.recChunks, { type: rec.mimeType });
+        // Increment before async save so the number is locked in even if save is slow (item 9).
+        // Do NOT reset peer.recChunks here — the next _startMonitorSegment resets it at its
+        // top, avoiding a race where a late ondataavailable from the old recorder would land
+        // in the new segment's array after an in-onstop reset (item 10).
+        const segNum = peer.recSegNum++;
         const ext    = rec.mimeType.includes('mp4') ? 'mp4' : 'webm';
-        const suffix = multiSegment ? `_part${String(peer.recSegNum + 1).padStart(2,'0')}` : '';
+        const suffix = multiSegment ? `_part${String(segNum + 1).padStart(2,'0')}` : '';
         const filename = `${peer.recBaseName}${suffix}.${ext}`;
-        peer.recSegNum++;
         _saveMonitorSegment(filename, blob, rec.mimeType);
       }
       peer.recorder = null;
@@ -1238,11 +1245,17 @@ async function _renderTlVideo(frames, videoQualityRes) {
       };
       rec.start();
       let i = 0;
-      (function tick() {
+      const frameDuration = 1000 / 24;
+      const startTime = performance.now();
+      (function tick(now) {
         if (i >= bitmaps.length) { rec.stop(); return; }
+        // Use wall-clock position so the browser can yield between frames
+        // without causing frame drift. Skip forward if we're behind.
+        const expectedFrame = Math.floor((now - startTime) / frameDuration);
+        if (expectedFrame > i) i = Math.min(expectedFrame, bitmaps.length - 1);
         ctx.drawImage(bitmaps[i++], 0, 0, targetW, targetH);
-        setTimeout(tick, 1000 / 24);
-      })();
+        requestAnimationFrame(tick);
+      })(startTime);
     });
   } catch (e) {
     console.warn('Timelapse render failed:', e);
@@ -1762,6 +1775,7 @@ document.getElementById('panelCopyCode').addEventListener('click',  () => copyTo
 document.getElementById('panelCopyLink').addEventListener('click',  () => copyToClipboard(joinURL, 'Link copied!'));
 document.getElementById('newSessionBtn').addEventListener('click',  () => {
   closePanel('sessionPanel');
+  sessionStorage.removeItem('camnet_room'); // prevent stale room rejoin on next page load
   wsSend({ type: 'create-room' });
   peers.forEach((_, id) => onCameraLeft(id));
 });
@@ -1950,6 +1964,15 @@ function stopPing() {
   clearInterval(pingIntervalId);
   pingIntervalId = null;
 }
+
+// ── Settings reset ─────────────────────────────────────────────
+document.getElementById('resetSettingsBtn').addEventListener('click', () => {
+  if (!confirm('Reset all settings to defaults and reload?')) return;
+  Object.keys(localStorage)
+    .filter(k => k.startsWith('camnet.viewer.'))
+    .forEach(k => localStorage.removeItem(k));
+  location.reload();
+});
 
 // ── Escape key closes panels ───────────────────────────────────
 document.addEventListener('keydown', (e) => {

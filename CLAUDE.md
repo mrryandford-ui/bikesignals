@@ -83,6 +83,34 @@ CamNet is a peer-to-peer multi-phone LAN security camera app. One phone acts as 
 
 ## Known Issues & Fixes
 
+### Fixed (Sprint 3)
+- ✅ **Quality change mid-recording breaks MediaRecorder (camera.js):**
+  - Root cause: `handleCommand('quality')` called `initMedia()` which stopped the old stream; active MediaRecorder then errored.
+  - Fix: `_changeQuality(value)` helper: if recording active, sets `recordActive = false`, awaits recorder onstop (saves final segment), then calls `initMedia`, replaces track, restarts recording with `_startCameraSegment`. Toast: "Quality changed mid-recording — new segment started".
+- ✅ **Stale sessionStorage roomId rejoined after "New session" (viewer.js):**
+  - `newSessionBtn` now calls `sessionStorage.removeItem('camnet_room')` before `create-room`.
+- ✅ **Android media notification persists after hangup (camera.js):**
+  - `stopKeepAlive()` now clears `navigator.mediaSession.metadata = null` after setting `playbackState = 'none'` (in try/catch for WebView compatibility).
+- ✅ **Browser-side camera recording had no monitor upload fallback (camera.js):**
+  - `_saveCameraSegment` now POSTs to `/api/save-video` when `AndroidBridge` is undefined, with download-link fallback if the POST fails (mirrors `_saveMonitorSegment` in viewer.js).
+- ✅ **Hover rules stuck on touch (app.css):**
+  - All `:hover` rules (`.role-card.viewer/camera:hover`, `.icon-btn:hover`, `.icon-btn.danger:hover`, `.btn-outline:hover`, `.panel-close:hover`, `.cam-controls .icon-btn:not(.active):hover`) wrapped in `@media (hover: hover)`.
+- ✅ **CDN scripts loaded without crossOrigin (viewer.js):**
+  - `loadScript` now accepts `{ integrity, crossOrigin }` options; TF.js and COCO-SSD calls pass `crossOrigin: 'anonymous'`. SRI `integrity` hash slots are present with a comment on how to compute them.
+- ✅ **AI model version doc drift (CLAUDE.md):** Updated coco-ssd 2.2.2 → 2.2.3 in tech stack.
+- ✅ **Repo structure references non-existent CamNetService.kt (CLAUDE.md):** Replaced with `SignalingService.kt` and `StreamingService.kt`.
+- ✅ **Timelapse render setTimeout chain blocks UI (viewer.js):**
+  - `_renderTlVideo` tick loop converted from `setTimeout(tick, 1000/24)` to `requestAnimationFrame` with wall-clock frame position. Browser yields between frames; render fps stays at 24 via `canvas.captureStream(24)`.
+- ✅ **recordSegNum incremented after async save — could skip on partial failure (camera.js + viewer.js):**
+  - Camera: `const segNum = recordSegNum++` before `_saveCameraSegment` call.
+  - Monitor: `const segNum = peer.recSegNum++` before `_saveMonitorSegment` call.
+- ✅ **recChunks double-reset race in monitor recording (viewer.js):**
+  - Removed `peer.recChunks = []` from inside `rec.onstop`. Only `_startMonitorSegment` top resets the array, preventing a late `ondataavailable` from a dying recorder writing into the new segment's array.
+- ✅ **Public STUN servers used on LAN-only app (viewer.js + camera.js):**
+  - `ICE_SERVERS = []` in both files. Camera adds 30 s fallback: if host candidates don't connect, retries `createPeer()` with STUN list. Console logs which path succeeded. Viewer handles new offer from camera retry normally.
+- ✅ **No way to reset persisted settings (viewer.js + viewer.html):**
+  - "Reset to defaults" button at bottom of settings panel. Confirms, then clears all `camnet.viewer.*` localStorage keys and reloads.
+
 ### Fixed (Post-sprint regression fixes)
 - ✅ **ERR_CLEARTEXT_NOT_PERMITTED on Monitor start (network_security_config.xml):**
   - Root cause: IP addresses are not valid `<domain>` elements in Android NSC — they are silently ignored, so the RFC1918 domain-config blocks did nothing. `http://localhost:3000/` hit the `base-config` (cleartext denied) and bounced back to home.
@@ -176,7 +204,7 @@ CamNet is a peer-to-peer multi-phone LAN security camera app. One phone acts as 
 | Android | Kotlin, WebView, AndroidBridge (JavascriptInterface) |
 | Web (Monitor/Camera) | HTML5, Vanilla JS, WebRTC, MediaRecorder |
 | Styling | CSS Grid, flexbox |
-| AI | TensorFlow.js + COCO-SSD (lite_mobilenet_v2) |
+| AI | TensorFlow.js 4.21.0 + COCO-SSD 2.2.3 (lite_mobilenet_v2) |
 | Assets | SVG icons, JSON manifests |
 
 ---
@@ -296,7 +324,8 @@ camnet/
 │       │   ├── CamNetServer.kt         # Ktor server + WS signaling
 │       │   ├── SslProxy.kt             # HTTPS termination
 │       │   ├── AndroidBridge.kt        # JS interface (save snapshots/videos)
-│       │   └── CamNetService.kt        # Foreground service (keep camera alive)
+│       │   ├── SignalingService.kt      # Foreground service: runs Ktor server + WS signaling
+│       │   └── StreamingService.kt     # Foreground service: keeps camera alive with screen off
 │       └── res/
 │           ├── drawable/ic_launcher_foreground.xml  # App icon vector
 │           ├── mipmap-anydpi-v26/ic_launcher.xml    # Adaptive icon

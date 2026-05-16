@@ -63,7 +63,7 @@ a { text-decoration: none; color: inherit; }
   border: 1px solid var(--border);
   color: var(--text-dim);
 }
-.btn-outline:hover { border-color: var(--accent); color: var(--accent); }
+@media (hover: hover) { .btn-outline:hover { border-color: var(--accent); color: var(--accent); } }
 .btn-ghost {
   background: rgba(255,255,255,0.06);
   color: var(--text-dim);
@@ -84,10 +84,12 @@ a { text-decoration: none; color: inherit; }
   flex-shrink: 0;
 }
 .icon-btn:active   { transform: scale(0.9); }
-.icon-btn:hover    { background: rgba(255,255,255,0.15); }
 .icon-btn.active   { background: var(--accent); color: #fff; }
 .icon-btn.danger   { background: rgba(239,68,68,0.3); color: var(--accent-r); }
-.icon-btn.danger:hover { background: var(--accent-r); color: #fff; }
+@media (hover: hover) {
+  .icon-btn:hover        { background: rgba(255,255,255,0.15); }
+  .icon-btn.danger:hover { background: var(--accent-r); color: #fff; }
+}
 
 /* ── Inputs ────────────────────────────────────────────────── */
 input[type="text"] {
@@ -175,7 +177,7 @@ input[type="text"]::placeholder { color: var(--text-muted); }
   flex-shrink: 0;
   transition: background 0.15s;
 }
-.panel-close:hover  { background: var(--surface3); color: var(--text); }
+@media (hover: hover) { .panel-close:hover { background: var(--surface3); color: var(--text); } }
 .panel-close:active { transform: scale(0.9); }
 .panel-row {
   display: flex;
@@ -308,8 +310,10 @@ input[type="text"]::placeholder { color: var(--text-muted); }
   transition: border-color 0.2s, transform 0.15s;
 }
 .role-card:active { transform: scale(0.97); }
-.role-card.viewer:hover { border-color: var(--accent); }
-.role-card.camera:hover { border-color: var(--accent-g); }
+@media (hover: hover) {
+  .role-card.viewer:hover { border-color: var(--accent); }
+  .role-card.camera:hover { border-color: var(--accent-g); }
+}
 .role-icon {
   width: 52px; height: 52px;
   border-radius: var(--radius);
@@ -527,7 +531,7 @@ input[type="text"]::placeholder { color: var(--text-muted); }
 .cam-card.show-controls .cam-controls { opacity: 1; pointer-events: auto; }
 .cam-controls .icon-btn { width: 32px; height: 32px; font-size: 14px; flex-shrink: 0; }
 .cam-controls .icon-btn:not(.active) { opacity: 0.55; }
-.cam-controls .icon-btn:not(.active):hover { opacity: 1; }
+@media (hover: hover) { .cam-controls .icon-btn:not(.active):hover { opacity: 1; } }
 
 /* Card menu toggle — small button in the top bar that opens/closes the controls. */
 .cam-menu-btn {

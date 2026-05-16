@@ -1,6 +1,9 @@
 'use strict';
 
-const ICE_SERVERS = [
+// LAN-first: empty ICE servers — host candidates are sufficient for same-subnet
+// WebRTC. Falls back to STUN after 30 s if host candidates fail to connect.
+const ICE_SERVERS = [];
+const ICE_SERVERS_STUN = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
   { urls: 'stun:stun2.l.google.com:19302' },
@@ -27,7 +30,9 @@ let torchOn    = false;
 let quality    = 720;
 let wakeLock   = null;
 let wsOpen     = false;
-let mediaBusy  = false;
+let mediaBusy        = false;
+let usedStunFallback = false; // true after first STUN retry
+let iceFallbackTimer = null;
 
 // ── Recording state ────────────────────────────────────────────
 const CAM_SEGMENT_MS  = 5 * 60 * 1000;
@@ -175,6 +180,8 @@ function connectWS() {
 
 function giveUpAndReturnToSetup(reason) {
   cancelGiveUpTimer();
+  clearTimeout(iceFallbackTimer); iceFallbackTimer = null;
+  usedStunFallback = false;
   if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
   if (wakeLock)    { wakeLock.release().catch(() => {}); wakeLock = null; }
   stopKeepAlive();
@@ -242,7 +249,10 @@ async function onMessage(msg) {
 // ── WebRTC ─────────────────────────────────────────────────────
 async function createPeer() {
   closePeer();
-  pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+  clearTimeout(iceFallbackTimer); iceFallbackTimer = null;
+
+  const iceServers = usedStunFallback ? ICE_SERVERS_STUN : ICE_SERVERS;
+  pc = new RTCPeerConnection({ iceServers });
 
   // Add all media tracks
   localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
@@ -253,11 +263,31 @@ async function createPeer() {
 
   pc.onconnectionstatechange = () => {
     switch (pc.connectionState) {
-      case 'connected':    setConnStatus('connected', 'Streaming'); applyBitrate(); break;
-      case 'disconnected': setConnStatus('disconnected', 'Reconnecting…'); break;
-      case 'failed':       pc.restartIce(); break;
+      case 'connected':
+        clearTimeout(iceFallbackTimer); iceFallbackTimer = null;
+        console.log('[CamNet] Connected via ' + (usedStunFallback ? 'STUN' : 'LAN host candidates'));
+        setConnStatus('connected', 'Streaming');
+        applyBitrate();
+        break;
+      case 'disconnected':
+        setConnStatus('disconnected', 'Reconnecting…');
+        break;
+      case 'failed':
+        pc.restartIce();
+        break;
     }
   };
+
+  // 30 s timeout: if host candidates haven't connected, retry with STUN servers.
+  if (!usedStunFallback) {
+    iceFallbackTimer = setTimeout(async () => {
+      if (pc && pc.connectionState !== 'connected') {
+        console.log('[CamNet] 30 s LAN timeout — retrying with STUN servers');
+        usedStunFallback = true;
+        await createPeer();
+      }
+    }, 30_000);
+  }
 
   const offer = await pc.createOffer({
     offerToReceiveAudio: false,
@@ -294,6 +324,47 @@ async function applyBitrate() {
   }
 }
 
+// ── Quality change helper ──────────────────────────────────────
+// Shared by both the remote camera-command and the local quality panel.
+// Cleanly breaks any in-progress recording segment before swapping streams.
+async function _changeQuality(value) {
+  if (!QUALITY[value]) return;
+  quality = value;
+  document.getElementById('qualityLabel').textContent = `${value}p`;
+  document.querySelectorAll('.quality-item').forEach(i => {
+    i.classList.toggle('selected', parseInt(i.dataset.q, 10) === value);
+  });
+
+  // If recording, stop the current segment cleanly before swapping streams.
+  // Setting recordActive = false prevents onstop from auto-chaining the next segment.
+  const wasRecording = recordActive;
+  if (wasRecording && recorder && recorder.state !== 'inactive') {
+    clearTimeout(recordSegTimer); recordSegTimer = null;
+    recordActive = false;
+    await new Promise(resolve => {
+      const orig = recorder.onstop;
+      recorder.onstop = function () { orig?.call(this); resolve(); };
+      recorder.stop();
+    });
+  }
+
+  await initMedia();
+  if (pc) {
+    const newTrack = localStream?.getVideoTracks()[0];
+    const sender   = pc.getSenders().find(s => s.track?.kind === 'video');
+    if (sender && newTrack) await sender.replaceTrack(newTrack).catch(() => {});
+    applyBitrate();
+  }
+
+  if (wasRecording) {
+    recordActive = true;
+    const mimeType = ['video/webm;codecs=vp8,opus', 'video/webm;codecs=vp8', 'video/webm']
+      .find(t => MediaRecorder.isTypeSupported(t)) || '';
+    _startCameraSegment(mimeType);
+    showToast('Quality changed mid-recording — new segment started');
+  }
+}
+
 // ── Commands from viewer ───────────────────────────────────────
 async function handleCommand({ command, value }) {
   switch (command) {
@@ -317,24 +388,8 @@ async function handleCommand({ command, value }) {
       }
       break;
     case 'quality':
-      if (QUALITY[value]) {
-        quality = value;
-        document.getElementById('qualityLabel').textContent = `${value}p`;
-        document.querySelectorAll('.quality-item').forEach(i => {
-          i.classList.toggle('selected', parseInt(i.dataset.q, 10) === value);
-        });
-        try {
-          await initMedia();
-          if (pc) {
-            const newTrack = localStream.getVideoTracks()[0];
-            const sender = pc.getSenders().find(s => s.track?.kind === 'video');
-            if (sender && newTrack) await sender.replaceTrack(newTrack);
-            applyBitrate();
-          }
-        } catch (e) {
-          console.warn('Remote quality change failed:', e);
-        }
-      }
+      try { await _changeQuality(value); }
+      catch (e) { console.warn('Remote quality change failed:', e); }
       break;
     case 'record-start':
       startCameraRecording(value?.durationMs ?? 0);
@@ -376,9 +431,9 @@ function _startCameraSegment(mimeType) {
       if (recordChunks.length > 0) {
         const blob   = new Blob(recordChunks, { type: rec.mimeType });
         const ext    = rec.mimeType.includes('mp4') ? 'mp4' : 'webm';
-        const suffix = multiSeg ? `_part${String(recordSegNum + 1).padStart(2,'0')}` : '';
+        const segNum = recordSegNum++;                          // lock in before async save
+        const suffix = multiSeg ? `_part${String(segNum + 1).padStart(2,'0')}` : '';
         _saveCameraSegment(blob, `${recordBaseName}${suffix}.${ext}`);
-        recordSegNum++;
       }
       recordChunks = [];
       recorder = null;
@@ -415,11 +470,25 @@ function _saveCameraSegment(blob, filename) {
     reader.onloadend = () => window.AndroidBridge.saveVideo(reader.result, filename);
     reader.readAsDataURL(blob);
   } else {
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = filename; a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 30000);
-    showToast('Video downloaded');
+    // Browser: try posting to monitor's gallery first (same as viewer.js _saveMonitorSegment),
+    // then fall back to a local download link.
+    fetch('/api/save-video', {
+      method: 'POST',
+      headers: {
+        'Content-Type': blob.type || 'video/webm',
+        'X-Filename': encodeURIComponent(filename),
+      },
+      body: blob,
+    }).then(r => {
+      if (r.ok) { showToast('Video saved to monitor gallery'); }
+      else throw new Error(`HTTP ${r.status}`);
+    }).catch(() => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = filename; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 30000);
+      showToast('Video downloaded');
+    });
   }
 }
 
@@ -486,23 +555,9 @@ document.getElementById('qualityBackdrop').addEventListener('click', () => {
 document.getElementById('qualityList').addEventListener('click', async (e) => {
   const item = e.target.closest('[data-q]');
   if (!item || mediaBusy) return;
-  const q = parseInt(item.dataset.q, 10);
-  document.querySelectorAll('.quality-item').forEach(i => i.classList.remove('selected'));
-  item.classList.add('selected');
-  quality = q;
-  document.getElementById('qualityLabel').textContent = `${q}p`;
   document.getElementById('qualityPanel').classList.add('hidden');
-  try {
-    await initMedia();
-    if (pc) {
-      const newTrack = localStream.getVideoTracks()[0];
-      const sender = pc.getSenders().find(s => s.track?.kind === 'video');
-      if (sender && newTrack) await sender.replaceTrack(newTrack);
-      applyBitrate();
-    }
-  } catch (e) {
-    console.warn('Quality change failed:', e);
-  }
+  try { await _changeQuality(parseInt(item.dataset.q, 10)); }
+  catch (e) { console.warn('Quality change failed:', e); }
 });
 
 // ── Flip button ────────────────────────────────────────────────
@@ -515,6 +570,8 @@ function hangup() {
   exitStealth();
   stopCameraRecording();
   closePeer();
+  clearTimeout(iceFallbackTimer); iceFallbackTimer = null;
+  usedStunFallback = false;
   if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
   if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
   stopKeepAlive();
@@ -661,6 +718,7 @@ function stopKeepAlive() {
   }
   if ('mediaSession' in navigator) {
     navigator.mediaSession.playbackState = 'none';
+    try { navigator.mediaSession.metadata = null; } catch {}
   }
 }
 
