@@ -376,7 +376,8 @@ class MainActivity : AppCompatActivity() {
         if (parts.size != 4) return false
         return parts[0] == 10 ||
             (parts[0] == 172 && parts[1] in 16..31) ||
-            (parts[0] == 192 && parts[1] == 168)
+            (parts[0] == 192 && parts[1] == 168) ||
+            (parts[0] == 100 && parts[1] in 64..127)  // RFC 6598 CGNAT / Tailscale
     }
 
     private fun requestPermissions() {

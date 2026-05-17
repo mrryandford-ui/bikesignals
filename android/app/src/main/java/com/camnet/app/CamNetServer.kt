@@ -289,7 +289,7 @@ class CamNetServer(port: Int, private val assets: AssetManager, private val cont
     fun lanIP(): String? = localIPs().firstOrNull()
 
     fun localIPs(): List<String> = try {
-        NetworkInterface.getNetworkInterfaces()?.toList()
+        val all = NetworkInterface.getNetworkInterfaces()?.toList()
             .orEmpty()
             .filter { !it.isLoopback && it.isUp }
             .flatMap { it.inetAddresses.toList() }
@@ -297,6 +297,16 @@ class CamNetServer(port: Int, private val assets: AssetManager, private val cont
             .filter { !it.isLoopbackAddress }
             .mapNotNull { it.hostAddress }
             .distinct()
+        // Prefer RFC1918 private IPs (WiFi/LAN) over RFC6598 CGNAT/Tailscale (100.64-127.x)
+        val lan = all.filter { ip ->
+            val p = ip.split(".").mapNotNull { it.toIntOrNull() }
+            p.size == 4 && (
+                p[0] == 10 ||
+                (p[0] == 172 && p[1] in 16..31) ||
+                (p[0] == 192 && p[1] == 168)
+            )
+        }
+        if (lan.isNotEmpty()) lan else all
     } catch (_: Exception) { emptyList() }
 
     private fun mimeOf(path: String) = when {
