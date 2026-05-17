@@ -13,10 +13,14 @@
   console.log('[CamNet] camera.js boot room=' + urlRoom + ' nonce=' + urlNonce);
 })();
 
-// Auto-reload when service worker activates with fresh assets
+// Auto-reload when service worker activates with fresh assets.
+// Skip if we're mid-join (room param present) — location.reload() on
+// Android WebView can strip query params, losing the room code and nonce.
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.addEventListener('message', (e) => {
-    if (e.data?.type === 'SW_UPDATED') location.reload();
+    if (e.data?.type === 'SW_UPDATED') {
+      if (!new URLSearchParams(location.search).get('room')) location.reload();
+    }
   });
 }
 

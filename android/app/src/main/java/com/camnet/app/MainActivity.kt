@@ -425,9 +425,12 @@ class MainActivity : AppCompatActivity() {
           document.getElementById('ip').focus();
           document.getElementById('backBtn').onclick = function(){ AndroidBridge.resetServer(); };
 
+          var connecting = false; // guard: prevent double-navigation after QR scan
           function connect(){
+            if(connecting) return;
             var ip = document.getElementById('ip').value.trim().replace(/[\/\s]/g,'');
             if(!ip) return;
+            connecting = true;
             var pw = document.getElementById('pw').value.trim();
             if(pw) AndroidBridge.setPendingPassword(pw);
             document.querySelector('button[onclick="connect()"]').textContent = 'Connecting…';
@@ -465,7 +468,8 @@ class MainActivity : AppCompatActivity() {
                     } catch(e2) {
                       document.getElementById('ip').value = raw;
                     }
-                    // Attempt auto-connect via the bridge
+                    // Guard connect() so it can't fire after we've already navigated
+                    connecting = true;
                     AndroidBridge.openCameraFromQR(raw);
                   }
                 } catch(e){}
