@@ -1,5 +1,12 @@
 'use strict';
 
+// Auto-reload when service worker activates with fresh assets
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.addEventListener('message', (e) => {
+    if (e.data?.type === 'SW_UPDATED') location.reload();
+  });
+}
+
 // LAN-first: empty ICE servers — host candidates are sufficient for same-subnet
 // WebRTC. Falls back to STUN after 30 s if host candidates fail to connect.
 const ICE_SERVERS = [];

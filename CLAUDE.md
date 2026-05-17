@@ -111,6 +111,16 @@ CamNet is a peer-to-peer multi-phone LAN security camera app. One phone acts as 
 - ✅ **No way to reset persisted settings (viewer.js + viewer.html):**
   - "Reset to defaults" button at bottom of settings panel. Confirms, then clears all `camnet.viewer.*` localStorage keys and reloads.
 
+### Fixed (v1.71 — SW cache bust, Android 13+ back navigation, back button)
+- ✅ **Stale service worker cache (public/sw.js):**
+  - Cache version bumped `camnet-v8` → `camnet-v9`. `skipWaiting()` already present in install handler.
+  - Activate handler now posts `{ type: 'SW_UPDATED' }` to all open window clients after old caches are deleted.
+  - `viewer.js` and `camera.js` both listen for `SW_UPDATED` and call `location.reload()` so fresh assets load automatically without manual refresh.
+- ✅ **Back gesture broken on Android 13+ (MainActivity.kt):**
+  - Replaced deprecated `onBackPressed()` override with `onBackPressedDispatcher.addCallback()` using `OnBackPressedCallback`. Fires correctly for both hardware back button and gesture swipe-back on Android 13/14. Logic unchanged: `canGoBack()` → `goBack()`, else `showHome()`.
+- ✅ **`goHome()` JavascriptInterface added (AndroidBridge.kt):**
+  - `AndroidBridge.goHome()` calls `showHome()` on the UI thread. Setup screen already has a back button (`resetServer()`); `goHome()` is available for screens that want to navigate home without clearing the saved server URL.
+
 ### Fixed (v1.70 — Motion detection overhaul + native push notifications)
 - ✅ **Settings panel toggles show wrong state on open (viewer.js):**
   - All six toggles (`globalMotionToggle`, `motionAutoSnapToggle`, `motionFlashToggle`, `smartDetectionToggle`, `muteAllToggle`, `mirrorToggle`) now sync to current variable state via `classList.toggle('on', value)` before `openPanel()` fires.
@@ -399,4 +409,4 @@ camnet/
 
 ---
 
-**Last Updated:** May 2026 (v1.70 — motion detection overhaul, native push notifications)
+**Last Updated:** May 2026 (v1.71 — SW cache bust, Android 13+ back nav, goHome bridge)

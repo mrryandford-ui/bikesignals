@@ -1,5 +1,12 @@
 'use strict';
 
+// Auto-reload when service worker activates with fresh assets
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.addEventListener('message', (e) => {
+    if (e.data?.type === 'SW_UPDATED') location.reload();
+  });
+}
+
 // LAN-first: host candidates are sufficient for same-subnet WebRTC.
 // Camera drives STUN fallback via createPeer() retry; viewer just handles new offers.
 const ICE_SERVERS = [];

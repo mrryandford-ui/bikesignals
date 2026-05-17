@@ -16,6 +16,14 @@ class AndroidBridge(
     private val context: Context,
     private val onLoadUrl: (String) -> Unit,
 ) {
+    /** Called from any screen's back/home button to navigate to the home screen. */
+    @JavascriptInterface
+    fun goHome() {
+        (context as? MainActivity)?.runOnUiThread {
+            (context as? MainActivity)?.showHome()
+        }
+    }
+
     /** Called by camera.js when streaming starts — starts the camera foreground service. */
     @JavascriptInterface
     fun startStreaming() {
