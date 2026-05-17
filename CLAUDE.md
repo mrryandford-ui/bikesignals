@@ -385,4 +385,4 @@ camnet/
 
 ---
 
-**Last Updated:** May 2026 (v1.63 — Tailscale/RFC6598 IP handling)
+**Last Updated:** May 2026 (v1.66 — Tailscale/RFC6598 IP handling)
