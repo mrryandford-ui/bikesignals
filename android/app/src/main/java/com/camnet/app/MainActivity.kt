@@ -97,6 +97,96 @@ class MainActivity : AppCompatActivity() {
 
         checkAndOfferCrashReport()
         showHome()
+        checkForUpdate()
+    }
+
+    // ── Auto-update ───────────────────────────────────────────────
+    private fun checkForUpdate() {
+        Thread {
+            try {
+                val url  = java.net.URL("https://api.github.com/repos/mrryandford-ui/CamNet/releases/latest")
+                val conn = url.openConnection() as java.net.HttpURLConnection
+                conn.setRequestProperty("Accept", "application/vnd.github+json")
+                conn.connectTimeout = 5_000
+                conn.readTimeout    = 5_000
+                if (conn.responseCode != 200) return@Thread
+                val json       = org.json.JSONObject(conn.inputStream.bufferedReader().readText())
+                val latestTag  = json.getString("tag_name")
+                val latestNum  = latestTag.trimStart('v').toIntOrNull() ?: return@Thread
+                val currentNum = BuildConfig.VERSION_CODE
+                if (latestNum <= currentNum) return@Thread
+                val assets = json.getJSONArray("assets")
+                var apkUrl: String? = null
+                for (i in 0 until assets.length()) {
+                    val asset = assets.getJSONObject(i)
+                    if (asset.getString("name").endsWith(".apk")) {
+                        apkUrl = asset.getString("browser_download_url"); break
+                    }
+                }
+                if (apkUrl == null) return@Thread
+                val finalApkUrl = apkUrl
+                runOnUiThread {
+                    AlertDialog.Builder(this)
+                        .setTitle("Update available")
+                        .setMessage(
+                            "CamNet v${latestNum} is available (you have v${currentNum}).\n\nDownload and install now?"
+                        )
+                        .setPositiveButton("Update") { _, _ -> downloadAndInstall(finalApkUrl, latestNum) }
+                        .setNegativeButton("Later", null)
+                        .show()
+                }
+            } catch (_: Exception) { /* best-effort, ignore failures */ }
+        }.start()
+    }
+
+    private fun downloadAndInstall(apkUrl: String, version: Int) {
+        android.widget.Toast.makeText(this, "Downloading CamNet v${version}…", android.widget.Toast.LENGTH_SHORT).show()
+        Thread {
+            try {
+                val request = android.app.DownloadManager.Request(android.net.Uri.parse(apkUrl)).apply {
+                    setTitle("CamNet v${version}")
+                    setDescription("Downloading update…")
+                    setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                    setDestinationInExternalPublicDir(android.os.Environment.DIRECTORY_DOWNLOADS, "CamNet-v${version}.apk")
+                    setMimeType("application/vnd.android.package-archive")
+                }
+                val dm = getSystemService(DOWNLOAD_SERVICE) as android.app.DownloadManager
+                val downloadId = dm.enqueue(request)
+                val query = android.app.DownloadManager.Query().setFilterById(downloadId)
+                var downloading = true
+                while (downloading) {
+                    Thread.sleep(1_000)
+                    val cursor = dm.query(query)
+                    if (cursor.moveToFirst()) {
+                        when (cursor.getInt(cursor.getColumnIndexOrThrow(android.app.DownloadManager.COLUMN_STATUS))) {
+                            android.app.DownloadManager.STATUS_SUCCESSFUL -> {
+                                downloading = false; runOnUiThread { promptInstall(version) }
+                            }
+                            android.app.DownloadManager.STATUS_FAILED -> {
+                                downloading = false
+                                runOnUiThread { android.widget.Toast.makeText(this, "Download failed — check your connection", android.widget.Toast.LENGTH_LONG).show() }
+                            }
+                        }
+                    }
+                    cursor.close()
+                }
+            } catch (e: Exception) {
+                runOnUiThread { android.widget.Toast.makeText(this, "Update failed: ${e.message}", android.widget.Toast.LENGTH_LONG).show() }
+            }
+        }.start()
+    }
+
+    private fun promptInstall(version: Int) {
+        val file = java.io.File(
+            android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS),
+            "CamNet-v${version}.apk"
+        )
+        val uri = androidx.core.content.FileProvider.getUriForFile(this, "${packageName}.provider", file)
+        startActivity(Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, "application/vnd.android.package-archive")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        })
     }
 
     // ── Crash reporting ───────────────────────────────────────────

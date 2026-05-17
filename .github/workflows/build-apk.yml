@@ -66,6 +66,19 @@ jobs:
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: camnet-camera-${{ github.sha }}
+          name: CamNet-v${{ github.run_number }}.apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
           retention-days: 90
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ github.run_number }}
+          name: CamNet v${{ github.run_number }}
+          draft: false
+          prerelease: false
+          files: android/app/build/outputs/apk/debug/app-debug.apk
+          generate_release_notes: false
+          body: "Automated build v${{ github.run_number }}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

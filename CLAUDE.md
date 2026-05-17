@@ -111,6 +111,14 @@ CamNet is a peer-to-peer multi-phone LAN security camera app. One phone acts as 
 - ✅ **No way to reset persisted settings (viewer.js + viewer.html):**
   - "Reset to defaults" button at bottom of settings panel. Confirms, then clears all `camnet.viewer.*` localStorage keys and reloads.
 
+### Fixed (v1.80 — Auto-update via GitHub Releases)
+- ✅ **GitHub Actions workflow creates Releases (build-apk.yml):** Each successful build now publishes a tagged GitHub Release (`v{run_number}`) with the APK attached. `GITHUB_TOKEN` used automatically — no extra secrets needed.
+- ✅ **Version check on launch (MainActivity.kt `checkForUpdate()`):** Background thread hits `api.github.com/repos/.../releases/latest`, compares `tag_name` (strip `v`, parse int) against `BuildConfig.VERSION_CODE`. Silent on network failure (5s timeout). Shows `AlertDialog` if newer version found.
+- ✅ **Download + install (MainActivity.kt `downloadAndInstall` + `promptInstall`):** Uses `DownloadManager` to fetch APK to `Downloads/`, polls for completion, then triggers install via `FileProvider` URI with `ACTION_VIEW`.
+- ✅ **FileProvider (AndroidManifest.xml + res/xml/file_provider_paths.xml):** `${applicationId}.provider` authority; external `Download/` path exposed for install URI.
+- ✅ **Permissions added:** `REQUEST_INSTALL_PACKAGES`, `WRITE_EXTERNAL_STORAGE` (maxSdk 28).
+- ✅ **build.gradle:** `buildFeatures { buildConfig true }` so `BuildConfig.VERSION_CODE` compiles; added `androidx.activity:activity-ktx:1.8.2` (fixes `OnBackPressedCallback` unresolved reference from Sprint 4A).
+
 ### Fixed (v1.79 — Blank room code / LAN IP not detected on Android)
 - ✅ **Root cause: viewer.html redirect navigated from localhost to LAN IP, breaking SSL (viewer.html):**
   - The inline redirect script (opens `https://LAN_IP:3443` when on localhost) was causing viewer.js `fetch('/api/info')` and WebSocket to connect to the LAN IP. The self-signed cert is only trusted for `localhost` via NSC — not for the LAN IP — so both JS fetch and WS SSL failed silently, leaving room code blank.
@@ -470,4 +478,4 @@ camnet/
 
 ---
 
-**Last Updated:** May 2026 (v1.79 — blank room code fix, LAN IP redirect suppressed on Android)
+**Last Updated:** May 2026 (v1.80 — auto-update via GitHub Releases)
