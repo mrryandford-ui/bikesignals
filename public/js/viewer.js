@@ -19,7 +19,7 @@ let joinURL   = null; // full URL camera phones should open (uses LAN IP, not lo
 const peers = new Map(); // cameraId → { pc, name, stream, recorder, motion, ... }
 let cameraCounter = 0;
 
-let globalMotion = true;
+let globalMotion = false;
 let motionSens = 'mid';
 let muteAll = false;
 let mirrorFront = true;
@@ -121,7 +121,7 @@ function lsLoad(key, fallback) {
 }
 
 // Rehydrate before any UI renders
-globalMotion          = lsLoad('globalMotion', true);
+globalMotion          = lsLoad('globalMotion', false);
 motionSens            = lsLoad('motionSens', 'mid');
 muteAll               = lsLoad('muteAll', false);
 mirrorFront           = lsLoad('mirrorFront', true);
@@ -614,6 +614,10 @@ async function handleCardAction(cameraId, action, btn) {
         btn.classList.add('active');
         showToast(smartDetectionEnabled ? '🧠 Smart motion detection on' : '🎯 Motion detection on');
       }
+      // Sync global state + settings panel toggle to reflect card state
+      globalMotion = Array.from(peers.values()).some(p => p.motion !== null);
+      lsSave('globalMotion', globalMotion);
+      { const t = document.getElementById('globalMotionToggle'); if (t) t.classList.toggle('on', globalMotion); }
       break;
 
     case 'zone':
@@ -1904,6 +1908,9 @@ document.getElementById('globalMotionToggle').addEventListener('click', function
   peers.forEach((_, id) => {
     if (globalMotion) startMotion(id);
     else              stopMotion(id);
+    // Sync each card's motion button to match
+    const btn = document.querySelector(`#card-${id} [data-action="motion"]`);
+    if (btn) btn.classList.toggle('active', globalMotion);
   });
 });
 
