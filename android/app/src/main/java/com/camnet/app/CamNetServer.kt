@@ -67,7 +67,7 @@ class CamNetServer(port: Int, private val assets: AssetManager, private val cont
     )
 
     // ── Per-connection state ──────────────────────────────────────
-    private class SessionState(val id: String) {
+    private class SessionState(val id: String, val remoteIp: String = "unknown") {
         @Volatile var roomId: String? = null
         @Volatile var role: String? = null        // "viewer" | "camera"
         @Volatile var cameraName: String? = null
@@ -87,7 +87,10 @@ class CamNetServer(port: Int, private val assets: AssetManager, private val cont
             timeout    = Duration.ofSeconds(60)
         }
         routing {
-            webSocket("/")         { handleSocket(this) }
+            webSocket("/")         {
+                val ip = try { call.request.origin.remoteHost } catch (_: Exception) { "unknown" }
+                handleSocket(this, ip)
+            }
             get("/api/info")       { serveApiInfo(call) }
             post("/api/save-video"){ saveVideoToGallery(call) }
             get("/")               { serveAsset(call) }
@@ -119,8 +122,8 @@ class CamNetServer(port: Int, private val assets: AssetManager, private val cont
     val isAlive get() = started
 
     // ── WebSocket session handler ─────────────────────────────────
-    private suspend fun handleSocket(ws: DefaultWebSocketSession) {
-        val state = SessionState(uid())
+    private suspend fun handleSocket(ws: DefaultWebSocketSession, remoteIp: String = "unknown") {
+        val state = SessionState(uid(), remoteIp)
         try {
             for (frame in ws.incoming) {
                 if (frame !is Frame.Text) continue
@@ -167,8 +170,7 @@ class CamNetServer(port: Int, private val assets: AssetManager, private val cont
             }
 
             "join-room" -> {
-                val remoteIp = try { ws.call.request.origin.remoteHost } catch (_: Exception) { "unknown" }
-                if (isRateLimited(remoteIp)) {
+                if (isRateLimited(state.remoteIp)) {
                     trySend(ws, jObj("type" to "error", "code" to "RATE_LIMITED",
                         "message" to "Too many join attempts — wait 60 seconds and try again."))
                     return
