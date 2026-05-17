@@ -488,4 +488,4 @@ camnet/
 
 ---
 
-**Last Updated:** May 2026 (v1.81 — session code fix, password UX, placeholder fix)
+**Last Updated:** May 2026 (v1.83 — version corrected to match build number)
