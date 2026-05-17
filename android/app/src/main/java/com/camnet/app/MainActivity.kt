@@ -105,7 +105,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ── Auto-update ───────────────────────────────────────────────
-    private fun checkForUpdate() {
+    internal fun checkForUpdate(manual: Boolean = false) {
         Thread {
             try {
                 val url  = java.net.URL("https://api.github.com/repos/mrryandford-ui/CamNet/releases/latest")
@@ -113,15 +113,21 @@ class MainActivity : AppCompatActivity() {
                 conn.setRequestProperty("Accept", "application/vnd.github+json")
                 conn.connectTimeout = 5_000
                 conn.readTimeout    = 5_000
-                if (conn.responseCode != 200) return@Thread
-                val json       = org.json.JSONObject(conn.inputStream.bufferedReader().readText())
+                if (conn.responseCode != 200) {
+                    if (manual) runOnUiThread { android.widget.Toast.makeText(this, "Update check failed (HTTP ${conn.responseCode})", android.widget.Toast.LENGTH_LONG).show() }
+                    return@Thread
+                }
+                val json        = org.json.JSONObject(conn.inputStream.bufferedReader().readText())
                 val latestTag   = json.getString("tag_name")
                 val latestNum   = latestTag.trimStart('v').toIntOrNull() ?: return@Thread
                 val currentNum  = BuildConfig.VERSION_CODE
                 val currentName = try { packageManager.getPackageInfo(packageName, 0).versionName ?: "?" } catch (_: Exception) { "?" }
                 val latestName  = "1.$latestNum"
                 android.util.Log.i("CamNet", "Update check: latest=$latestNum ($latestName) current=$currentNum ($currentName)")
-                if (latestNum <= currentNum) return@Thread  // already on latest
+                if (latestNum <= currentNum) {
+                    if (manual) runOnUiThread { android.widget.Toast.makeText(this, "Already on latest version (v$currentName)", android.widget.Toast.LENGTH_SHORT).show() }
+                    return@Thread
+                }
                 val assets = json.getJSONArray("assets")
                 var apkUrl: String? = null
                 for (i in 0 until assets.length()) {
@@ -135,14 +141,14 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread {
                     AlertDialog.Builder(this)
                         .setTitle("Update available")
-                        .setMessage(
-                            "CamNet v$latestName is available (you have v$currentName).\n\nDownload and install now?"
-                        )
+                        .setMessage("CamNet v$latestName is available (you have v$currentName).\n\nDownload and install now?")
                         .setPositiveButton("Update") { _, _ -> downloadAndInstall(finalApkUrl, latestNum) }
                         .setNegativeButton("Later", null)
                         .show()
                 }
-            } catch (_: Exception) { /* best-effort, ignore failures */ }
+            } catch (e: Exception) {
+                if (manual) runOnUiThread { android.widget.Toast.makeText(this, "Update check failed: ${e.message}", android.widget.Toast.LENGTH_LONG).show() }
+            }
         }.start()
     }
 
@@ -322,6 +328,12 @@ class MainActivity : AppCompatActivity() {
         <p class="tagline">Multi-phone security camera</p>
         <button class="btn primary"   onclick="AndroidBridge.startMonitor()">🖥&nbsp; Monitor</button>
         <button class="btn secondary" onclick="AndroidBridge.showCameraSetup()">📷&nbsp; Camera</button>
+        <button onclick="AndroidBridge.checkForUpdateManual()"
+          style="background:transparent;border:1.5px solid #1e293b;color:#64748b;
+                 font-size:13px;padding:10px;width:100%;border-radius:12px;
+                 margin-top:4px;cursor:pointer;-webkit-tap-highlight-color:transparent">
+          ⬆ Check for updates
+        </button>
         <hr class="divider">
         <p class="hint">Monitor: start the server &amp; watch feeds<br>Camera: stream this phone to a Monitor</p>
         <div class="footer">

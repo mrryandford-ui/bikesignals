@@ -16,6 +16,15 @@ class AndroidBridge(
     private val context: Context,
     private val onLoadUrl: (String) -> Unit,
 ) {
+    /** Called from home screen "Check for updates" button — runs update check with user feedback. */
+    @JavascriptInterface
+    fun checkForUpdateManual() {
+        (context as? MainActivity)?.runOnUiThread {
+            android.widget.Toast.makeText(context, "Checking for updates…", android.widget.Toast.LENGTH_SHORT).show()
+        }
+        (context as? MainActivity)?.checkForUpdate(manual = true)
+    }
+
     /** Appends a diagnostic message to crash_report.txt and logcat for debugging. */
     @JavascriptInterface
     fun logDiagnostic(message: String) {
