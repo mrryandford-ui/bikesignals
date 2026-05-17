@@ -115,10 +115,13 @@ class MainActivity : AppCompatActivity() {
                 conn.readTimeout    = 5_000
                 if (conn.responseCode != 200) return@Thread
                 val json       = org.json.JSONObject(conn.inputStream.bufferedReader().readText())
-                val latestTag  = json.getString("tag_name")
-                val latestNum  = latestTag.trimStart('v').toIntOrNull() ?: return@Thread
-                val currentNum = BuildConfig.VERSION_CODE
-                if (latestNum <= currentNum) return@Thread
+                val latestTag   = json.getString("tag_name")
+                val latestNum   = latestTag.trimStart('v').toIntOrNull() ?: return@Thread
+                val currentNum  = BuildConfig.VERSION_CODE
+                val currentName = try { packageManager.getPackageInfo(packageName, 0).versionName ?: "?" } catch (_: Exception) { "?" }
+                val latestName  = "1.$latestNum"
+                android.util.Log.i("CamNet", "Update check: latest=$latestNum ($latestName) current=$currentNum ($currentName)")
+                if (latestNum <= currentNum) return@Thread  // already on latest
                 val assets = json.getJSONArray("assets")
                 var apkUrl: String? = null
                 for (i in 0 until assets.length()) {
@@ -133,7 +136,7 @@ class MainActivity : AppCompatActivity() {
                     AlertDialog.Builder(this)
                         .setTitle("Update available")
                         .setMessage(
-                            "CamNet v${latestNum} is available (you have v${currentNum}).\n\nDownload and install now?"
+                            "CamNet v$latestName is available (you have v$currentName).\n\nDownload and install now?"
                         )
                         .setPositiveButton("Update") { _, _ -> downloadAndInstall(finalApkUrl, latestNum) }
                         .setNegativeButton("Later", null)

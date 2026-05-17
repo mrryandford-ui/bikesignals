@@ -111,6 +111,12 @@ CamNet is a peer-to-peer multi-phone LAN security camera app. One phone acts as 
 - ✅ **No way to reset persisted settings (viewer.js + viewer.html):**
   - "Reset to defaults" button at bottom of settings panel. Confirms, then clears all `camnet.viewer.*` localStorage keys and reloads.
 
+### Fixed (v1.91 — version auto-set from CI run number, update dialog shows versionName)
+- ✅ **versionCode/versionName now driven by `GITHUB_RUN_NUMBER` in build.gradle:** Replaced hardcoded values with `def runNum = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInteger()`. Local builds use run number 1; CI builds always produce a versionCode that exactly matches the GitHub release tag. Removed the brittle `sed` step from the workflow.
+- ✅ **Update dialog showed versionCode not versionName (MainActivity.kt):** Dialog now reads `versionName` from PackageManager and shows `"CamNet v1.91 is available (you have v1.90)"` instead of raw integers. `latestName` computed as `"1.$latestNum"` to match the version scheme.
+- ✅ **Added `Log.i` to update check:** Logs `latest=$latestNum current=$currentNum` on every check so mismatches are visible in logcat.
+- ✅ **`latestNum > currentNum` guard confirmed:** Line 121 already uses `<=` (not `<`), so dialog only appears when a newer version exists.
+
 ### Fixed (v1.90 — SSL BLOCKED log, mic NotReadableError no longer blocks join)
 - ✅ **`isPrivateHost` confirmed correct:** `(parts[0]==192 && parts[1]==168)` covers full 192.168.0.0/16 — 192.168.137.x passes with no change needed.
 - ✅ **`onReceivedSslError` blocked path now logs (MainActivity.kt):** Added `Log.e("CamNet", "SSL BLOCKED for '$urlHost'...")` so the blocked case is unambiguous in logcat.
@@ -510,4 +516,4 @@ camnet/
 
 ---
 
-**Last Updated:** May 2026 (v1.90 — SSL blocked log, mic NotReadableError fix)
+**Last Updated:** May 2026 (v1.91 — version auto-set from CI run number)

@@ -11,8 +11,11 @@ android {
         applicationId "com.camnet.app"
         minSdk 29
         targetSdk 34
-        versionCode 21
-        versionName "1.90"
+        // versionCode and versionName are driven by the GitHub Actions run number at CI time.
+        // Local builds use run number 1 as a fallback.
+        def runNum = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInteger()
+        versionCode runNum
+        versionName "1." + runNum
     }
 
     signingConfigs {
