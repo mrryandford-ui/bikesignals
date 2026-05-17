@@ -111,6 +111,11 @@ CamNet is a peer-to-peer multi-phone LAN security camera app. One phone acts as 
 - ✅ **No way to reset persisted settings (viewer.js + viewer.html):**
   - "Reset to defaults" button at bottom of settings panel. Confirms, then clears all `camnet.viewer.*` localStorage keys and reloads.
 
+### Fixed (v1.90 — SSL BLOCKED log, mic NotReadableError no longer blocks join)
+- ✅ **`isPrivateHost` confirmed correct:** `(parts[0]==192 && parts[1]==168)` covers full 192.168.0.0/16 — 192.168.137.x passes with no change needed.
+- ✅ **`onReceivedSslError` blocked path now logs (MainActivity.kt):** Added `Log.e("CamNet", "SSL BLOCKED for '$urlHost'...")` so the blocked case is unambiguous in logcat.
+- ✅ **`NotReadableError` on mic no longer blocks camera join (camera.js `initMedia()`):** When all audio tiers fail AND the video-only call also fails (hardware locked), instead of throwing (which aborts the join), logs a warning, shows a toast, sets `micEnabled=false`, `localStream=null`, and returns normally. `connectWS()` still runs. Guard added in `createPeer()` — `if (localStream)` before `addTrack` so null stream doesn't crash.
+
 ### Fixed (v1.89 — onLoadUrl logging + SSL error diagnostics)
 - ✅ **`onLoadUrl` was a silent anonymous lambda (MainActivity.kt):** Extracted into named `onLoadUrl(url: String)` function with `Log.i` on entry and `Log.e` + Toast on exception. `AndroidBridge` now wired via `::onLoadUrl` reference.
 - ✅ **`onReceivedSslError` used `java.net.URL` for host extraction (MainActivity.kt):** `URL` throws on non-HTTP schemes and strips brackets from IPv6. Switched to `java.net.URI` which handles all URL forms. Added `Log.w` line showing `urlHost trusted=true/false` for every SSL event — visible in logcat without USB adb grep.
@@ -505,4 +510,4 @@ camnet/
 
 ---
 
-**Last Updated:** May 2026 (v1.89 — onLoadUrl logging, SSL error diagnostics)
+**Last Updated:** May 2026 (v1.90 — SSL blocked log, mic NotReadableError fix)

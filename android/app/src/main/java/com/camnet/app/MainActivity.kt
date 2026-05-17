@@ -56,6 +56,7 @@ class MainActivity : AppCompatActivity() {
                 val trusted = isPrivateHost(urlHost)
                 android.util.Log.w("CamNet", "SSL error for '$urlHost' trusted=$trusted url=$url")
                 if (trusted) handler.proceed() else {
+                    android.util.Log.e("CamNet", "SSL BLOCKED for '$urlHost' url=$url")
                     handler.cancel()
                     android.widget.Toast.makeText(this@MainActivity,
                         "Blocked SSL from untrusted host: $urlHost", android.widget.Toast.LENGTH_LONG).show()

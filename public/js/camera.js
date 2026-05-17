@@ -159,11 +159,16 @@ async function initMedia() {
         try {
           vStream = await navigator.mediaDevices.getUserMedia({ video });
         } catch (e5) {
-          // Total failure — camera unavailable, surface as a real error
-          throw new Error(
-            'Camera unavailable. Check permissions.\nAudio errors: ' +
-            [audioErr1, audioErr2].filter(Boolean).join(' | ')
-          );
+          // Video also unavailable (hardware locked / NotReadableError).
+          // Don't block the join — proceed with no stream so the WS session
+          // can still connect. User can retry camera from the live screen.
+          const msg = 'Camera+mic unavailable (' + e5.name + '). Joining without stream.';
+          console.warn('[CamNet]', msg, { audioErr1, audioErr2, e5: e5.message });
+          try { window.AndroidBridge?.logDiagnostic?.(msg); } catch (_) {}
+          showToast('Camera unavailable — joining without stream');
+          micEnabled = false;
+          localStream = null;
+          return; // exit try block; finally resets mediaBusy
         }
         try {
           const aStream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -341,8 +346,8 @@ async function createPeer() {
   const iceServers = usedStunFallback ? ICE_SERVERS_STUN : ICE_SERVERS;
   pc = new RTCPeerConnection({ iceServers });
 
-  // Add all media tracks
-  localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+  // Add all media tracks (localStream may be null if camera/mic unavailable)
+  if (localStream) localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
 
   pc.onicecandidate = (e) => {
     if (e.candidate) wsSend({ type: 'ice-candidate', candidate: e.candidate });
