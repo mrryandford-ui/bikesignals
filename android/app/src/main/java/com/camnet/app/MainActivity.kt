@@ -150,11 +150,15 @@ class MainActivity : AppCompatActivity() {
         android.widget.Toast.makeText(this, "Downloading CamNet v${version}…", android.widget.Toast.LENGTH_SHORT).show()
         Thread {
             try {
+                val destFile = java.io.File(
+                    getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS),
+                    "CamNet-v${version}.apk"
+                )
                 val request = android.app.DownloadManager.Request(android.net.Uri.parse(apkUrl)).apply {
                     setTitle("CamNet v${version}")
                     setDescription("Downloading update…")
                     setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                    setDestinationInExternalPublicDir(android.os.Environment.DIRECTORY_DOWNLOADS, "CamNet-v${version}.apk")
+                    setDestinationUri(android.net.Uri.fromFile(destFile))
                     setMimeType("application/vnd.android.package-archive")
                 }
                 val dm = getSystemService(DOWNLOAD_SERVICE) as android.app.DownloadManager
@@ -185,15 +189,21 @@ class MainActivity : AppCompatActivity() {
 
     private fun promptInstall(version: Int) {
         val file = java.io.File(
-            android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS),
+            getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS),
             "CamNet-v${version}.apk"
         )
+        if (!file.exists()) {
+            runOnUiThread { android.widget.Toast.makeText(this, "APK not found: ${file.path}", android.widget.Toast.LENGTH_LONG).show() }
+            return
+        }
         val uri = androidx.core.content.FileProvider.getUriForFile(this, "${packageName}.provider", file)
-        startActivity(Intent(Intent.ACTION_VIEW).apply {
+        val intent = Intent(Intent.ACTION_VIEW).apply {
             setDataAndType(uri, "application/vnd.android.package-archive")
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        })
+            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        }
+        runOnUiThread { startActivity(intent) }
     }
 
     // ── Crash reporting ───────────────────────────────────────────
