@@ -404,7 +404,7 @@ class MainActivity : AppCompatActivity() {
         <input id="pw" type="password" placeholder="Password (if required — ask monitor user)"
           style="width:100%;padding:14px;font-size:15px;background:#1e293b;
           border:1.5px solid #334155;border-radius:14px;color:#f1f5f9;
-          outline:none;box-sizing:border-box">
+          outline:none;box-sizing:border-box;flex:none">
         <button onclick="connect()">Connect &rarr;</button>
         <button class="back" id="backBtn">← Back</button>
         <p class="hint">First visit: tap Advanced &rarr; Proceed (once only)</p>
