@@ -123,13 +123,21 @@ class AndroidBridge(
         thread(isDaemon = true, name = "camnet-server-poll") {
             repeat(40) {
                 if (SignalingService.isRunning()) {
-                    val sslPort = CamNetServer.SSL_PORT
-                    activity.runOnUiThread {
-                        activity.webView.loadUrl("https://localhost:$sslPort/viewer.html")
+                    // isRunning() flips true as soon as SslProxy.start() is called,
+                    // but the background thread may not have bound the port yet.
+                    // Confirm the SSL port is actually accepting before loading.
+                    try {
+                        java.net.Socket("127.0.0.1", CamNetServer.SSL_PORT).use {}
+                        val sslPort = CamNetServer.SSL_PORT
+                        activity.runOnUiThread {
+                            activity.webView.loadUrl("https://localhost:$sslPort/viewer.html")
+                        }
+                        return@thread
+                    } catch (_: Exception) {
+                        // SSL port not ready yet — fall through and sleep
                     }
-                    return@thread
                 }
-                try { java.net.Socket("127.0.0.1", CamNetServer.SSL_PORT).use {} } catch (_: Exception) {}
+                Thread.sleep(100) // short sleep before recheck
                 Thread.sleep(500)
             }
             // Server never came up — show a useful error
