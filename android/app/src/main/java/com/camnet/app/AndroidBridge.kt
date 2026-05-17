@@ -104,10 +104,16 @@ class AndroidBridge(
                        else if (rawPort != -1) rawPort
                        else CamNetServer.SSL_PORT
             val base = "$scheme://${uri.host}:$port"
-            val room = uri.getQueryParameter("room") ?: ""
+            val room  = uri.getQueryParameter("room")  ?: ""
+            val nonce = uri.getQueryParameter("nonce") ?: ""
             context.getSharedPreferences("camnet", Context.MODE_PRIVATE)
                 .edit().putString("server_url", base).apply()
-            val dest = if (room.isNotEmpty()) "$base/camera.html?room=$room" else "$base/camera.html"
+            val query = buildString {
+                if (room.isNotEmpty())  append("?room=$room")
+                if (nonce.isNotEmpty()) append(if (room.isNotEmpty()) "&nonce=$nonce" else "?nonce=$nonce")
+            }
+            val dest = "$base/camera.html$query"
+            android.util.Log.i("CamNet", "openCameraFromQR: room=$room nonce=$nonce dest=$dest")
             (context as? MainActivity)?.runOnUiThread { onLoadUrl(dest) }
         } catch (e: Exception) {
             android.util.Log.w("CamNet", "openCameraFromQR failed: $e")

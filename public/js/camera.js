@@ -1,5 +1,18 @@
 'use strict';
 
+// Boot diagnostic — log URL params so we can confirm nonce/room reach camera.js
+(function() {
+  const p       = new URLSearchParams(location.search);
+  const urlRoom  = p.get('room')  || '';
+  const urlNonce = p.get('nonce') || '';
+  try {
+    window.AndroidBridge?.logDiagnostic?.(
+      'camera.js boot: room=' + urlRoom + ' nonce=' + urlNonce + ' url=' + location.href
+    );
+  } catch (_) {}
+  console.log('[CamNet] camera.js boot room=' + urlRoom + ' nonce=' + urlNonce);
+})();
+
 // Auto-reload when service worker activates with fresh assets
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.addEventListener('message', (e) => {
