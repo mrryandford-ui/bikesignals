@@ -182,7 +182,8 @@ class AndroidBridge(
      * snapshot thumbnail. Each camera gets its own notification slot keyed by name.
      */
     @JavascriptInterface
-    fun fireMotionAlert(cameraName: String, snapshotBase64: String?) {
+    fun fireMotionAlert(cameraName: String, snapshotBase64: String?,
+                        playSound: Boolean, vibrate: Boolean) {
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
         val channel = NotificationChannel(
@@ -217,7 +218,11 @@ class AndroidBridge(
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setAutoCancel(true)
             .setContentIntent(tapIntent)
-            .setDefaults(NotificationCompat.DEFAULT_SOUND or NotificationCompat.DEFAULT_VIBRATE)
+            .setDefaults(
+                (if (playSound) NotificationCompat.DEFAULT_SOUND   else 0) or
+                (if (vibrate)   NotificationCompat.DEFAULT_VIBRATE else 0)
+            )
+            .also { if (!playSound) it.setSound(null) }
 
         if (!snapshotBase64.isNullOrEmpty()) {
             try {

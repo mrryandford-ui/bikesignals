@@ -83,7 +83,6 @@ const SENS = {
   mid:  { pixelDiff: 20, fraction: 0.01  },
   high: { pixelDiff: 15, fraction: 0.005 },
 };
-const MOTION_COOLDOWN_MS      = 8_000; // min ms between alerts per camera
 const MOTION_CONSECUTIVE_REQ  = 3;     // frames above threshold required before alert fires
 
 // ── AI smart detection (COCO-SSD via TensorFlow.js, on-device) ─
@@ -126,6 +125,9 @@ currentLayout         = lsLoad('currentLayout', 'l-auto');
 photoQuality          = lsLoad('photoQuality', '720');
 smartDetectionEnabled = lsLoad('smartDetectionEnabled', false);
 smartClasses          = new Set(lsLoad('smartClasses', ['person']));
+alertSound            = lsLoad('alertSound', true);
+alertVibration        = lsLoad('alertVibration', true);
+alertCooldown         = lsLoad('alertCooldown', 30);
 
 function loadScript(src, { integrity, crossOrigin } = {}) {
   return new Promise((resolve, reject) => {
@@ -447,6 +449,13 @@ function attachStream(cameraId, stream) {
     .finally(() => syncMuteBtn(cameraId));
   applyMirror(cameraId);
   startMotion(cameraId);
+  // Sync per-camera notify button state
+  const notifyBtn = document.querySelector(`#card-${cameraId} [data-action="notify"]`);
+  if (notifyBtn) {
+    const notifOn = lsLoad('alertCam_' + cameraId, true);
+    notifyBtn.classList.toggle('active', !notifOn);
+    notifyBtn.title = notifOn ? 'Notifications on' : 'Notifications off';
+  }
 }
 
 function applyMirror(cameraId) {
@@ -489,6 +498,7 @@ function addCameraCard(cameraId, name) {
       <button class="icon-btn" data-action="flash"       title="Toggle flash (remote)">🔦</button>
       <button class="icon-btn" data-action="stealth"     title="Stealth mode (remote)">🥷</button>
       <button class="icon-btn" data-action="quality"     title="Quality: 720p">🎞️</button>
+      <button class="icon-btn" data-action="notify"      title="Notifications">🔔</button>
       <button class="icon-btn" data-action="rename"      title="Rename">✏️</button>
       <button class="icon-btn danger" data-action="disconnect" title="Disconnect">✕</button>
     </div>
@@ -626,6 +636,17 @@ async function handleCardAction(cameraId, action, btn) {
       wsSend({ type: 'camera-command', cameraId, command: 'quality', value: chosen });
       btn.title = `Quality: ${chosen}p`;
       showToast(`${peer.name} → ${chosen}p`);
+      break;
+    }
+
+    case 'notify': {
+      const key = 'alertCam_' + cameraId;
+      const enabled = !lsLoad(key, true);
+      lsSave(key, enabled);
+      btn.classList.toggle('active', !enabled); // active = muted (bell off)
+      btn.title = enabled ? 'Notifications on' : 'Notifications off';
+      showToast(enabled ? '🔔 Notifications on for ' + (peer.name || cameraId)
+                        : '🔕 Notifications off for ' + (peer.name || cameraId));
       break;
     }
 
@@ -959,9 +980,12 @@ function showRecIndicator(cameraId, show) {
 
 // ── Motion detection ───────────────────────────────────────────
 let motionNotifEnabled  = false;
-let motionAutoSnap      = false;
-let motionFlash         = false;
+let motionAutoSnap       = false;
+let motionFlash          = false;
 let motionFlashStillMins = 2;
+let alertSound           = true;
+let alertVibration       = true;
+let alertCooldown        = 30; // seconds
 
 function startMotion(cameraId) {
   const peer = peers.get(cameraId);
@@ -1023,7 +1047,7 @@ function startMotion(cameraId) {
       }
 
       if (peer.motionConsecutive >= MOTION_CONSECUTIVE_REQ &&
-          now >= peer.lastMotionAt + MOTION_COOLDOWN_MS) {
+          now >= peer.lastMotionAt + alertCooldown * 1000) {
         peer.motionConsecutive = 0; // reset after firing
         if (smartDetectionEnabled && cocoModel && !peer.pendingSmartDetect) {
           if (now < (peer.lastSmartAt || 0) + SMART_DETECTION_COOLDOWN_MS) {
@@ -1132,6 +1156,8 @@ function hideMotionAlert(cameraId) {
 function fireNativeMotionAlert(cameraId) {
   const peer = peers.get(cameraId);
   if (!peer || !window.AndroidBridge?.fireMotionAlert) return;
+  // Per-camera notification toggle — on-screen indicator still shows even if OFF
+  if (!lsLoad('alertCam_' + cameraId, true)) return;
   const name = peer.name || ('Camera ' + cameraId);
   let snapshotBase64 = '';
   try {
@@ -1144,7 +1170,7 @@ function fireNativeMotionAlert(cameraId) {
       snapshotBase64 = cvs.toDataURL('image/jpeg', 0.6);
     }
   } catch (_) {}
-  window.AndroidBridge.fireMotionAlert(name, snapshotBase64);
+  window.AndroidBridge.fireMotionAlert(name, snapshotBase64, alertSound, alertVibration);
 }
 
 // ── Motion flash ───────────────────────────────────────────────
@@ -1793,6 +1819,11 @@ document.getElementById('settingsBtn').addEventListener('click', () => {
   document.getElementById('smartDetectionToggle').classList.toggle('on', smartDetectionEnabled);
   document.getElementById('muteAllToggle').classList.toggle('on', muteAll);
   document.getElementById('mirrorToggle').classList.toggle('on', mirrorFront);
+  document.getElementById('alertSoundToggle').classList.toggle('on', alertSound);
+  document.getElementById('alertVibrationToggle').classList.toggle('on', alertVibration);
+  document.querySelectorAll('#alertCooldownSeg .seg-btn').forEach(b => {
+    b.classList.toggle('active', parseInt(b.dataset.secs) === alertCooldown);
+  });
   openPanel('settingsPanel');
   // Web Notification permission not needed — native AndroidBridge.fireMotionAlert
   // fires OS notifications directly via NotificationManager, bypassing the Web API.
@@ -2008,6 +2039,28 @@ function stopPing() {
   clearInterval(pingIntervalId);
   pingIntervalId = null;
 }
+
+// Alert sound / vibration / cooldown
+document.getElementById('alertSoundToggle').addEventListener('click', function() {
+  alertSound = !alertSound;
+  this.classList.toggle('on', alertSound);
+  lsSave('alertSound', alertSound);
+});
+
+document.getElementById('alertVibrationToggle').addEventListener('click', function() {
+  alertVibration = !alertVibration;
+  this.classList.toggle('on', alertVibration);
+  lsSave('alertVibration', alertVibration);
+});
+
+document.getElementById('alertCooldownSeg').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-secs]');
+  if (!btn) return;
+  document.querySelectorAll('#alertCooldownSeg .seg-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  alertCooldown = parseInt(btn.dataset.secs);
+  lsSave('alertCooldown', alertCooldown);
+});
 
 // ── Settings reset ─────────────────────────────────────────────
 document.getElementById('resetSettingsBtn').addEventListener('click', () => {

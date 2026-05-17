@@ -111,6 +111,13 @@ CamNet is a peer-to-peer multi-phone LAN security camera app. One phone acts as 
 - ✅ **No way to reset persisted settings (viewer.js + viewer.html):**
   - "Reset to defaults" button at bottom of settings panel. Confirms, then clears all `camnet.viewer.*` localStorage keys and reloads.
 
+### Fixed (v1.72 — Motion alert notification controls)
+- ✅ **Alert sound toggle (viewer.html + viewer.js):** Settings panel "Motion Alerts" section. Persisted as `alertSound`. Passed to `AndroidBridge.fireMotionAlert` as `playSound`; notification built with `DEFAULT_SOUND` only when true.
+- ✅ **Alert vibration toggle:** Same section, persisted as `alertVibration`, passed as `vibrate`; notification built with `DEFAULT_VIBRATE` only when true.
+- ✅ **Alert cooldown segmented control (10s | 30s | 1m | 5m):** Replaces hardcoded 8s constant. Persisted as `alertCooldown` (seconds). Per-camera cooldown uses `alertCooldown * 1000` ms. Default 30s.
+- ✅ **Per-camera 🔔 button on each camera card:** Toggles `alertCam_{cameraId}` in localStorage. When OFF, motion still shows on-screen indicator but `fireNativeMotionAlert` returns early. Button shows `.active` (highlighted) when notifications are muted for that camera. State restored on stream attach.
+- ✅ **`AndroidBridge.fireMotionAlert` signature updated:** Now accepts `playSound: Boolean, vibrate: Boolean` from JS. Notification defaults controlled by these flags.
+
 ### Fixed (v1.71 — SW cache bust, Android 13+ back navigation, back button)
 - ✅ **Stale service worker cache (public/sw.js):**
   - Cache version bumped `camnet-v8` → `camnet-v9`. `skipWaiting()` already present in install handler.
@@ -409,4 +416,4 @@ camnet/
 
 ---
 
-**Last Updated:** May 2026 (v1.71 — SW cache bust, Android 13+ back nav, goHome bridge)
+**Last Updated:** May 2026 (v1.72 — motion alert notification controls)
