@@ -111,6 +111,13 @@ CamNet is a peer-to-peer multi-phone LAN security camera app. One phone acts as 
 - ✅ **No way to reset persisted settings (viewer.js + viewer.html):**
   - "Reset to defaults" button at bottom of settings panel. Confirms, then clears all `camnet.viewer.*` localStorage keys and reloads.
 
+### Fixed (v1.73 — Sprint 4A Security hardening)
+- ✅ **8-char room code with SecureRandom (CamNetServer.kt + server.js):** `roomCode()` now uses `SecureRandom` (Kotlin) / `crypto.randomInt` (Node) with custom alphabet `ABCDEFGHJKLMNPQRSTUVWXYZ23456789` (omits O/0/I/1 for readability). 32⁸ ≈ 1.1 trillion combinations.
+- ✅ **Join nonce (all files):** `sessionSecret()` generates 128-bit hex nonce per room. Included in `room-created`/`room-rejoined` messages. Viewer stores as `roomNonce`, includes in QR/share URL as `?nonce=HEX`. Camera reads from URL, sends in `join-room`. Server rejects with `BAD_TOKEN` if nonce missing or wrong.
+- ✅ **Rate limiting (CamNetServer.kt + server.js):** 10 join attempts per IP per 60 s. Rejected with `RATE_LIMITED`. Stale entries cleaned every 5 min via `cleanupScope` (Kotlin) / `setInterval` (Node). Camera stops retrying on rate limit or bad token.
+- ✅ **Optional session password (viewer.html + viewer.js + camera.html + camera.js):** Viewer sets password in Settings → Security panel. Hashed via `crypto.subtle.digest('SHA-256')`, sent as `set-password`. Camera always shows password field; hash included in `join-room`. Server uses `timingSafeEqual` (Node) to compare. Off by default.
+- ✅ **Security section added to CLAUDE.md:** Threat model, protection layers, limitations, WAN requirements.
+
 ### Fixed (v1.72 — Motion alert notification controls)
 - ✅ **Alert sound toggle (viewer.html + viewer.js):** Settings panel "Motion Alerts" section. Persisted as `alertSound`. Passed to `AndroidBridge.fireMotionAlert` as `playSound`; notification built with `DEFAULT_SOUND` only when true.
 - ✅ **Alert vibration toggle:** Same section, persisted as `alertVibration`, passed as `vibrate`; notification built with `DEFAULT_VIBRATE` only when true.
@@ -364,6 +371,33 @@ npm start  # or: node public/server.js
 
 ---
 
+## Security
+
+### What's Protected
+
+| Layer | Mechanism |
+|-------|-----------|
+| **WebRTC media** | DTLS-SRTP — end-to-end encrypted, mandatory. Monitor server cannot read media. |
+| **Signaling (LAN)** | TLS via SslProxy — self-signed cert, acceptable for LAN. Requires real cert for WAN. |
+| **Room code entropy** | 8 chars from `ABCDEFGHJKLMNPQRSTUVWXYZ23456789` (omits O/0/I/1). 32⁸ = 1.1 trillion combinations. Generated with `SecureRandom` (Java) / `crypto.randomInt` (Node.js). |
+| **Join nonce** | 128-bit hex secret generated with room. Required alongside room code to join. QR and share link carry both `?room=CODE&nonce=HEX`. Typing the 8-char code without the nonce is rejected with `BAD_TOKEN`. |
+| **Rate limiting** | 10 join attempts per IP per 60 s. 11th attempt rejected with `RATE_LIMITED`. In-memory, cleaned every 5 min. |
+| **Optional session password** | Viewer sets password via settings panel. Hashed client-side with SHA-256 (`crypto.subtle`). Camera must enter matching password. Server compares using `timingSafeEqual` (Node.js) / string equality (Kotlin). Off by default. |
+
+### Current Limitations
+- No 2FA
+- Signaling server (this app) can read SDP offers/answers — but NOT media (that's E2E encrypted)
+- Password hash is stored in-memory on server; restarts clear it
+- Self-signed TLS cert; camera phones get a browser warning on first connect
+
+### WAN Deployment (future)
+Requires: real TLS cert (Let's Encrypt), TURN server (coturn / Oracle Always Free), network-level rate limiting (Cloudflare WAF or iptables), and moving signaling to a persistent host.
+
+### Deferred
+- Encrypted-at-rest snapshots/recordings (key management + viewing flow changes) — Sprint 5
+
+---
+
 ## Getting Help
 
 **For Claude Code sessions:**
@@ -416,4 +450,4 @@ camnet/
 
 ---
 
-**Last Updated:** May 2026 (v1.72 — motion alert notification controls)
+**Last Updated:** May 2026 (v1.73 — Sprint 4A security hardening)

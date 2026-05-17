@@ -13,8 +13,9 @@ const ICE_SERVERS = [];
 
 // ── State ──────────────────────────────────────────────────────
 let ws = null;
-let roomId = null;
-let joinURL = null; // full URL camera phones should open (uses LAN IP, not localhost)
+let roomId    = null;
+let roomNonce = null; // 128-bit hex — required alongside room code to join
+let joinURL   = null; // full URL camera phones should open (uses LAN IP, not localhost)
 const peers = new Map(); // cameraId → { pc, name, stream, recorder, motion, ... }
 let cameraCounter = 0;
 
@@ -232,8 +233,8 @@ function setWsStatus(state) {
 // ── Message handler ────────────────────────────────────────────
 async function onMessage(msg) {
   switch (msg.type) {
-    case 'room-created':    onRoomCreated(msg.roomId); break;
-    case 'room-rejoined':   onRoomCreated(msg.roomId); break; // same UI update
+    case 'room-created':    onRoomCreated(msg.roomId, msg.nonce); break;
+    case 'room-rejoined':   onRoomCreated(msg.roomId, msg.nonce || roomNonce); break;
     case 'camera-joined':   onCameraJoined(msg.cameraId, msg.cameraName); break;
     case 'camera-left':     onCameraLeft(msg.cameraId);           break;
     case 'offer':           await handleOffer(msg);               break;
@@ -244,18 +245,31 @@ async function onMessage(msg) {
 }
 
 // ── Room created ───────────────────────────────────────────────
-function onRoomCreated(id) {
+function onRoomCreated(id, nonce) {
   roomId = id;
+  if (nonce) roomNonce = nonce;
   sessionStorage.setItem('camnet_room', id);
   const ip      = window._lanIP;
   const sslPort = window._sslPort || 3443;
   const base    = ip ? `https://${ip}:${sslPort}` : location.origin;
-  joinURL = `${base}/?room=${id}`;
+  const nonceParam = roomNonce ? `&nonce=${roomNonce}` : '';
+  joinURL = `${base}/?room=${id}${nonceParam}`;
 
   document.getElementById('roomCode').textContent = id;
   document.getElementById('panelRoomCode').textContent = id;
   buildQR(joinURL);
   document.getElementById('emptyState').classList.remove('hidden');
+}
+
+// ── Session password ───────────────────────────────────────────
+async function sha256hex(text) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function setSessionPassword(password) {
+  const hash = password ? await sha256hex(password) : '';
+  wsSend({ type: 'set-password', hash });
 }
 
 function buildQR(url) {
@@ -2040,6 +2054,14 @@ function stopPing() {
   pingIntervalId = null;
 }
 
+// Session password
+document.getElementById('setPasswordBtn').addEventListener('click', async () => {
+  const pw = document.getElementById('sessionPasswordInput').value;
+  await setSessionPassword(pw);
+  showToast(pw ? '🔒 Session password set' : '🔓 Session password cleared');
+  document.getElementById('sessionPasswordInput').value = '';
+});
+
 // Alert sound / vibration / cooldown
 document.getElementById('alertSoundToggle').addEventListener('click', function() {
   alertSound = !alertSound;
@@ -2117,8 +2139,9 @@ fetch('/api/info')
         if (!row) return;
         const chosenURL = row.dataset.url;
         const chosenIP  = new URL(chosenURL).hostname;
-        window._lanIP   = chosenIP;
-        joinURL = `${chosenURL}/?room=${roomId}`;
+        window._lanIP = chosenIP;
+        const nonceParam = roomNonce ? `&nonce=${roomNonce}` : '';
+        joinURL = `${chosenURL}/?room=${roomId}${nonceParam}`;
         buildQR(joinURL);
         // Mark selected
         disp.querySelectorAll('[data-url]').forEach(r => r.textContent = '  ' + r.dataset.url);

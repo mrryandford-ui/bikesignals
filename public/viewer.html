@@ -152,6 +152,18 @@
       <span style="font-size:11px;color:var(--text-muted);line-height:1.4">Motion alerts fire only when one of these is detected. Runs on-device, no cloud.</span>
     </div>
     <div style="margin:12px 0 4px;padding-top:12px;border-top:1px solid #1e293b">
+      <span class="panel-label" style="color:var(--text-muted)">Security</span>
+    </div>
+    <div class="panel-row" style="flex-direction:column;align-items:stretch;gap:8px">
+      <span class="panel-label">Session password <span style="color:var(--text-muted);text-transform:none;letter-spacing:0;font-weight:400">(optional)</span></span>
+      <div style="display:flex;gap:8px">
+        <input type="password" id="sessionPasswordInput" placeholder="Leave blank for no password" maxlength="64"
+          style="flex:1;padding:10px 12px;background:#1e293b;border:1.5px solid #334155;border-radius:10px;color:#f1f5f9;font-size:14px">
+        <button class="btn btn-outline" id="setPasswordBtn" style="padding:10px 14px;font-size:13px;white-space:nowrap">Set</button>
+      </div>
+      <span style="font-size:11px;color:var(--text-muted);line-height:1.4">Camera phones must enter this to join. Hashed locally, never sent in plain text.</span>
+    </div>
+    <div style="margin:12px 0 4px;padding-top:12px;border-top:1px solid #1e293b">
       <span class="panel-label" style="color:var(--text-muted)">Motion Alerts</span>
     </div>
     <div class="panel-row">

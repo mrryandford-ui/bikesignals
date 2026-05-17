@@ -24,7 +24,7 @@
       <div>
         <div class="field-label">Session Code</div>
         <div class="code-input-row">
-          <input type="text" id="codeInput" placeholder="XXXXXX" maxlength="6"
+          <input type="text" id="codeInput" placeholder="XXXXXXXX" maxlength="8"
             autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false">
         </div>
       </div>
@@ -32,6 +32,11 @@
       <div>
         <div class="field-label">Camera Name <span style="color:var(--text-muted);font-weight:400;text-transform:none">(optional)</span></div>
         <input type="text" id="nameInput" placeholder="e.g. Front Door" maxlength="30">
+      </div>
+
+      <div id="passwordRow">
+        <div class="field-label">Session Password <span style="color:var(--text-muted);font-weight:400;text-transform:none">(if set by monitor)</span></div>
+        <input type="password" id="passwordInput" placeholder="Leave blank if none" maxlength="64">
       </div>
 
       <div id="errorMsg" class="error-msg"></div>

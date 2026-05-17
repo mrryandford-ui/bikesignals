@@ -39,11 +39,25 @@ class CamNetServer(port: Int, private val assets: AssetManager, private val cont
     private val cleanupScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     // ── Room state ────────────────────────────────────────────────
-    private class Room {
+    private class Room(val nonce: String) {
         @Volatile var viewer: DefaultWebSocketSession? = null
         val cameras = ConcurrentHashMap<String, CamRecord>()
         @Volatile var cleanupTimer: Timer? = null
         val cameraCounter = java.util.concurrent.atomic.AtomicInteger(0)
+        @Volatile var passwordHash: String? = null // SHA-256 hex, null = no password
+    }
+
+    // ── Rate limiting ─────────────────────────────────────────────
+    private val joinAttempts = ConcurrentHashMap<String, MutableList<Long>>()
+    private val joinLock = Any()
+
+    private fun isRateLimited(ip: String): Boolean = synchronized(joinLock) {
+        val now   = System.currentTimeMillis()
+        val max   = 10; val window = 60_000L
+        val list  = joinAttempts.getOrPut(ip) { mutableListOf() }
+        list.removeAll { it < now - window }
+        if (list.size >= max) return true
+        list.add(now); false
     }
 
     private class CamRecord(
@@ -87,7 +101,20 @@ class CamNetServer(port: Int, private val assets: AssetManager, private val cont
         keyStore    = keyStore,
     )
 
-    fun start() { engine.start(wait = false); sslProxy.start(); started = true }
+    fun start() {
+        engine.start(wait = false); sslProxy.start(); started = true
+        // Periodically purge stale rate-limit entries to prevent unbounded growth
+        cleanupScope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(5 * 60 * 1000L)
+                val cutoff = System.currentTimeMillis() - 60_000L
+                synchronized(joinLock) {
+                    joinAttempts.values.forEach { it.removeAll { ts -> ts < cutoff } }
+                    joinAttempts.entries.removeIf { it.value.isEmpty() }
+                }
+            }
+        }
+    }
     fun stop()  { sslProxy.stop(); engine.stop(0, 0); cleanupScope.cancel(); started = false }
     val isAlive get() = started
 
@@ -114,61 +141,75 @@ class CamNetServer(port: Int, private val assets: AssetManager, private val cont
                     val r = rooms[old]
                     if (r?.viewer === ws) rooms.remove(old)
                 }
-                val id = roomCode()
-                rooms[id] = Room().also { it.viewer = ws }
+                val id = roomCode(); val nonce = sessionSecret()
+                rooms[id] = Room(nonce).also { it.viewer = ws }
                 state.roomId = id; state.role = "viewer"
-                trySend(ws, jObj("type" to "room-created", "roomId" to id, "lanIP" to lanIP()))
+                trySend(ws, jObj("type" to "room-created", "roomId" to id, "nonce" to nonce, "lanIP" to lanIP()))
             }
 
             "rejoin-room" -> {
                 val rId = msg.optString("roomId").uppercase().trim()
                 val room = rooms[rId]
                 if (room == null) {
-                    val newId = roomCode()
-                    rooms[newId] = Room().also { it.viewer = ws }
-                    state.roomId = newId; state.role = "viewer"
-                    trySend(ws, jObj("type" to "room-created", "roomId" to newId, "lanIP" to lanIP()))
+                    val id = roomCode(); val nonce = sessionSecret()
+                    rooms[id] = Room(nonce).also { it.viewer = ws }
+                    state.roomId = id; state.role = "viewer"
+                    trySend(ws, jObj("type" to "room-created", "roomId" to id, "nonce" to nonce, "lanIP" to lanIP()))
                     return
                 }
                 room.cleanupTimer?.cancel(); room.cleanupTimer = null
                 room.viewer = ws; state.roomId = rId; state.role = "viewer"
-                // Re-announce cameras BEFORE telling them to resend — order matters
                 room.cameras.forEach { (camId, cam) ->
-                    trySend(ws, jObj(
-                        "type" to "camera-joined",
-                        "cameraId" to camId,
-                        "cameraName" to (cam.cameraName ?: camId),
-                    ))
+                    trySend(ws, jObj("type" to "camera-joined", "cameraId" to camId, "cameraName" to (cam.cameraName ?: camId)))
                 }
-                trySend(ws, jObj("type" to "room-rejoined", "roomId" to rId))
+                trySend(ws, jObj("type" to "room-rejoined", "roomId" to rId, "nonce" to room.nonce))
                 room.cameras.values.forEach { trySend(it.session, jObj("type" to "viewer-reconnected")) }
             }
 
             "join-room" -> {
+                val remoteIp = try { ws.call.request.origin.remoteHost } catch (_: Exception) { "unknown" }
+                if (isRateLimited(remoteIp)) {
+                    trySend(ws, jObj("type" to "error", "code" to "RATE_LIMITED",
+                        "message" to "Too many join attempts — wait 60 seconds and try again."))
+                    return
+                }
                 val rId = msg.optString("roomId").uppercase().trim()
                 val room = rooms[rId]
                 if (room == null) {
-                    trySend(ws, jObj(
-                        "type" to "error", "code" to "NO_ROOM",
-                        "message" to "Room not found. Check the code and try again.",
-                    ))
+                    trySend(ws, jObj("type" to "error", "code" to "NO_ROOM",
+                        "message" to "Room not found. Check the code and try again."))
+                    return
+                }
+                // Nonce must match — prevents join with code alone (e.g. leaked 8-char code)
+                if (msg.optString("nonce") != room.nonce) {
+                    trySend(ws, jObj("type" to "error", "code" to "BAD_TOKEN",
+                        "message" to "Invalid join token. Use the QR code or full link."))
+                    return
+                }
+                // Optional session password check
+                val pwHash = room.passwordHash
+                if (pwHash != null && msg.optString("passwordHash") != pwHash) {
+                    trySend(ws, jObj("type" to "error", "code" to "BAD_PASSWORD",
+                        "message" to "Incorrect session password."))
                     return
                 }
                 val name = msg.optString("cameraName").trim()
                     .ifEmpty { "Camera ${room.cameraCounter.incrementAndGet()}" }
-                // Remove stale entry with same camera name
                 room.cameras.entries.firstOrNull { it.value.cameraName == name }?.let { stale ->
                     room.cameras.remove(stale.key)
-                    room.viewer?.let { v ->
-                        trySend(v, jObj("type" to "camera-left", "cameraId" to stale.key))
-                    }
+                    room.viewer?.let { v -> trySend(v, jObj("type" to "camera-left", "cameraId" to stale.key)) }
                 }
                 state.roomId = rId; state.role = "camera"; state.cameraName = name
                 room.cameras[state.id] = CamRecord(ws, state.id, name)
                 trySend(ws, jObj("type" to "joined", "cameraId" to state.id, "cameraName" to name))
-                room.viewer?.let {
-                    trySend(it, jObj("type" to "camera-joined", "cameraId" to state.id, "cameraName" to name))
-                }
+                room.viewer?.let { trySend(it, jObj("type" to "camera-joined", "cameraId" to state.id, "cameraName" to name)) }
+            }
+
+            "set-password" -> {
+                val room = rooms[state.roomId ?: return] ?: return
+                if (state.role != "viewer") return
+                val hash = msg.optString("hash").lowercase().trim()
+                room.passwordHash = hash.ifEmpty { null }
             }
 
             "offer", "answer", "ice-candidate" -> {
@@ -281,9 +322,18 @@ class CamNetServer(port: Int, private val assets: AssetManager, private val cont
 
     private fun uid() = UUID.randomUUID().toString().replace("-", "").take(8)
 
+    private val secureRandom = java.security.SecureRandom()
+    private val ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789" // no O/0/I/1
+
     private fun roomCode(): String {
-        val chars = ('A'..'Z') + ('0'..'9')
-        return (1..6).map { chars.random() }.joinToString("")
+        val sb = StringBuilder(8)
+        repeat(8) { sb.append(ALPHABET[secureRandom.nextInt(ALPHABET.length)]) }
+        return sb.toString()
+    }
+
+    private fun sessionSecret(): String {
+        val bytes = ByteArray(16); secureRandom.nextBytes(bytes)
+        return bytes.joinToString("") { "%02x".format(it) }
     }
 
     fun lanIP(): String? = localIPs().firstOrNull()

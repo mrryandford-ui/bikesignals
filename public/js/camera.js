@@ -57,8 +57,9 @@ const MAX_CONNECT_ATTEMPTS = 10; // 10 × 3s = 30s before giving up
 let connectAttempts = 0;
 let giveUpTimer    = null;
 
-// ── Pre-fill room code from URL param ──────────────────────────
+// ── Pre-fill room code and nonce from URL params ───────────────
 const params = new URLSearchParams(location.search);
+let urlNonce = params.get('nonce') || '';
 if (params.get('room')) {
   document.getElementById('codeInput').value = params.get('room').toUpperCase();
   // Came from QR scan or deep link — auto-join after a short delay so the
@@ -66,6 +67,11 @@ if (params.get('room')) {
   setTimeout(() => {
     if (!localStream) startJoin();
   }, 300);
+}
+
+async function sha256hex(text) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
 // ── Join button ────────────────────────────────────────────────
@@ -79,11 +85,17 @@ document.getElementById('nameInput').addEventListener('keydown', (e) => {
 
 async function startJoin() {
   const code = document.getElementById('codeInput').value.trim().toUpperCase();
-  if (code.length !== 6) { showError('Enter the 6-character session code'); return; }
+  if (code.length !== 8) { showError('Enter the 8-character session code'); return; }
   cameraName = document.getElementById('nameInput').value.trim() || null;
+  // Hash password client-side; empty string → no password attempt
+  const pwInput = (document.getElementById('passwordInput')?.value || '').trim();
+  const passwordHash = pwInput ? await sha256hex(pwInput) : '';
   hideError();
   setJoinLoading(true);
   roomId = code;
+  // Store nonce and passwordHash on window so connectWS can include them
+  window._joinNonce        = urlNonce;
+  window._joinPasswordHash = passwordHash;
   // Reset retry state so the 30s give-up window starts fresh from this user action.
   cancelGiveUpTimer();
   // Create AudioContext here — must be inside a user gesture
@@ -160,9 +172,11 @@ function connectWS() {
   ws.onopen = () => {
     wsOpen = true;
     ws.send(JSON.stringify({
-      type: 'join-room',
+      type:         'join-room',
       roomId,
-      cameraName: cameraName || undefined,
+      nonce:        window._joinNonce        || undefined,
+      passwordHash: window._joinPasswordHash || undefined,
+      cameraName:   cameraName               || undefined,
     }));
   };
 
@@ -246,6 +260,11 @@ async function onMessage(msg) {
       if (msg.code === 'NO_ROOM' && localStream) {
         setConnStatus('disconnected', 'Session expired — tap End to restart');
         return;
+      }
+      // Rate limited or bad token — stop retrying
+      if (msg.code === 'RATE_LIMITED' || msg.code === 'BAD_TOKEN') {
+        cancelGiveUpTimer();
+        giveUpAndReturnToSetup();
       }
       showError(msg.message || 'Connection error');
       setJoinLoading(false);

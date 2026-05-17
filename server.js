@@ -8,6 +8,7 @@ const path       = require('path');
 const fs         = require('fs');
 const selfsigned = require('selfsigned');
 const os         = require('os');
+const { randomBytes, randomInt, timingSafeEqual } = require('crypto');
 
 // ── TLS cert (generated once, reused forever) ──────────────────
 const CERT_DIR  = path.join(__dirname, '.certs');
@@ -42,9 +43,40 @@ async function getCert() {
 // ── Room state ─────────────────────────────────────────────────
 const rooms = new Map();
 
-function uid() { return Math.random().toString(36).slice(2, 10); }
+const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no O/0/I/1
 
-function roomCode() { return Math.random().toString(36).slice(2, 8).toUpperCase(); }
+function uid() { return randomBytes(4).toString('hex'); }
+
+function roomCode() {
+  let s = '';
+  for (let i = 0; i < 8; i++) s += ALPHABET[randomInt(ALPHABET.length)];
+  return s;
+}
+
+function sessionSecret() { return randomBytes(16).toString('hex'); }
+
+// ── Rate limiting ──────────────────────────────────────────────
+const joinAttempts = new Map(); // ip → [timestamp, ...]
+
+function isRateLimited(ip) {
+  const now = Date.now(), window = 60_000, max = 10;
+  const list = joinAttempts.get(ip) || [];
+  const recent = list.filter(t => t > now - window);
+  if (recent.length >= max) { joinAttempts.set(ip, recent); return true; }
+  recent.push(now);
+  joinAttempts.set(ip, recent);
+  return false;
+}
+
+// Clean up stale entries every 5 minutes
+setInterval(() => {
+  const cutoff = Date.now() - 60_000;
+  for (const [ip, list] of joinAttempts) {
+    const fresh = list.filter(t => t > cutoff);
+    if (fresh.length === 0) joinAttempts.delete(ip);
+    else joinAttempts.set(ip, fresh);
+  }
+}, 5 * 60 * 1000);
 
 function send(ws, obj) {
   if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj));
@@ -58,52 +90,60 @@ function handle(ws, msg) {
         const old = rooms.get(ws.roomId);
         if (old && old.viewer === ws) rooms.delete(ws.roomId);
       }
-      const id = roomCode();
-      rooms.set(id, { viewer: ws, cameras: new Map(), _cleanupTimer: null });
-      ws.roomId = id;
-      ws.role   = 'viewer';
-      send(ws, { type: 'room-created', roomId: id, lanIP: getLocalIPs()[0] || null });
+      const id = roomCode(), nonce = sessionSecret();
+      rooms.set(id, { viewer: ws, cameras: new Map(), _cleanupTimer: null, nonce, passwordHash: null });
+      ws.roomId = id; ws.role = 'viewer';
+      send(ws, { type: 'room-created', roomId: id, nonce, lanIP: getLocalIPs()[0] || null });
       break;
     }
 
-    // Viewer reconnecting after a tab-switch / brief disconnect — reattach to existing room
     case 'rejoin-room': {
       const roomId = (msg.roomId || '').toUpperCase().trim();
       const room   = rooms.get(roomId);
       if (!room) {
-        // Room already expired — treat as a fresh create
-        const id = roomCode();
-        rooms.set(id, { viewer: ws, cameras: new Map(), _cleanupTimer: null });
-        ws.roomId = id;
-        ws.role   = 'viewer';
-        send(ws, { type: 'room-created', roomId: id, lanIP: getLocalIPs()[0] || null });
+        const id = roomCode(), nonce = sessionSecret();
+        rooms.set(id, { viewer: ws, cameras: new Map(), _cleanupTimer: null, nonce, passwordHash: null });
+        ws.roomId = id; ws.role = 'viewer';
+        send(ws, { type: 'room-created', roomId: id, nonce, lanIP: getLocalIPs()[0] || null });
         return;
       }
-      clearTimeout(room._cleanupTimer);
-      room._cleanupTimer = null;
-      room.viewer = ws;
-      ws.roomId   = roomId;
-      ws.role     = 'viewer';
-      // Re-announce every existing camera so viewer can create its peer entries
-      // BEFORE telling cameras to resend offers — order matters
+      clearTimeout(room._cleanupTimer); room._cleanupTimer = null;
+      room.viewer = ws; ws.roomId = roomId; ws.role = 'viewer';
       room.cameras.forEach((cam, id) => {
         send(ws, { type: 'camera-joined', cameraId: id, cameraName: cam.cameraName });
       });
-      send(ws, { type: 'room-rejoined', roomId });
-      // Now cameras resend their WebRTC offers
+      send(ws, { type: 'room-rejoined', roomId, nonce: room.nonce });
       room.cameras.forEach(cam => send(cam, { type: 'viewer-reconnected' }));
       break;
     }
 
     case 'join-room': {
+      const ip = ws._socket?.remoteAddress || 'unknown';
+      if (isRateLimited(ip)) {
+        send(ws, { type: 'error', code: 'RATE_LIMITED', message: 'Too many join attempts — wait 60 seconds and try again.' });
+        return;
+      }
       const roomId = (msg.roomId || '').toUpperCase().trim();
       const room   = rooms.get(roomId);
       if (!room) {
         send(ws, { type: 'error', code: 'NO_ROOM', message: 'Room not found. Check the code and try again.' });
         return;
       }
+      // Nonce must match — prevents join with code alone
+      if ((msg.nonce || '') !== room.nonce) {
+        send(ws, { type: 'error', code: 'BAD_TOKEN', message: 'Invalid join token. Use the QR code or full link.' });
+        return;
+      }
+      // Optional password check (timing-safe comparison)
+      if (room.passwordHash) {
+        const supplied = Buffer.from((msg.passwordHash || '').toLowerCase(), 'hex');
+        const expected = Buffer.from(room.passwordHash, 'hex');
+        if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) {
+          send(ws, { type: 'error', code: 'BAD_PASSWORD', message: 'Incorrect session password.' });
+          return;
+        }
+      }
       const name = (msg.cameraName || '').trim() || `Camera ${room.cameras.size + 1}`;
-      // Remove any stale entry with the same name (camera reconnected with same name)
       for (const [oldId, oldWs] of room.cameras) {
         if (oldWs.cameraName === name) {
           room.cameras.delete(oldId);
@@ -111,12 +151,18 @@ function handle(ws, msg) {
           break;
         }
       }
-      ws.roomId     = roomId;
-      ws.role       = 'camera';
-      ws.cameraName = name;
+      ws.roomId = roomId; ws.role = 'camera'; ws.cameraName = name;
       room.cameras.set(ws.id, ws);
       send(ws,          { type: 'joined',        cameraId: ws.id, cameraName: name });
       send(room.viewer, { type: 'camera-joined', cameraId: ws.id, cameraName: name });
+      break;
+    }
+
+    case 'set-password': {
+      const room = rooms.get(ws.roomId);
+      if (!room || ws.role !== 'viewer') return;
+      const hash = (msg.hash || '').toLowerCase().trim();
+      room.passwordHash = hash || null;
       break;
     }
 
