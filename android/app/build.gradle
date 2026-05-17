@@ -96,9 +96,5 @@ def extractSslCert = tasks.register('extractSslCert') {
 
 afterEvaluate {
     preBuild.dependsOn copyWebAssets
-    tasks.configureEach { task ->
-        if (task.name ==~ /compile.*Kotlin|compile.*Java|process.*Resources|merge.*Assets/) {
-            task.dependsOn(extractSslCert)
-        }
-    }
+    preBuild.dependsOn extractSslCert
 }
