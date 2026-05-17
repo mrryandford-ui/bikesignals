@@ -111,6 +111,13 @@ CamNet is a peer-to-peer multi-phone LAN security camera app. One phone acts as 
 - ✅ **No way to reset persisted settings (viewer.js + viewer.html):**
   - "Reset to defaults" button at bottom of settings panel. Confirms, then clears all `camnet.viewer.*` localStorage keys and reloads.
 
+### Fixed (v1.62 — Monitor SSL definitive fix)
+- ✅ **fetch() and WebSocket SSL failures on Samsung Android 14 (network_security_config.xml + AndroidBridge.kt):**
+  - Root cause 1: `onReceivedSslError` only intercepts the main document SSL error on Samsung. fetch() and WebSocket SSL errors bypass it entirely → `/api/info` and the signaling WebSocket both silently failed → no room code, no IP list shown.
+  - Root cause 2: `isRunning()` sets `started = true` immediately after calling `sslProxy.start()`, but SslProxy binds its port on a background thread. First `loadUrl` could fire before port 3443 was accepting connections.
+  - Fix 1: Extracted CamNet's self-signed cert from `camnet-ssl.p12` → `res/raw/camnet_ssl_cert.pem`. Added as `<certificates src="@raw/camnet_ssl_cert"/>` trust anchor for localhost in `network_security_config.xml`. Android now trusts this cert at the OS level for ALL connections (main frame, fetch, WebSocket) — no `onReceivedSslError` workaround needed.
+  - Fix 2: Poll loop now probes the SSL port with a real TCP socket *after* `isRunning()` is true before calling `loadUrl`. If the port isn't accepting yet, it falls through and retries.
+
 ### Fixed (v1.61 — Samsung cleartext final fix)
 - ✅ **ERR_CLEARTEXT_NOT_PERMITTED on Samsung Android 14 — definitive fix (AndroidBridge.kt `startMonitor()`):**
   - Root cause: Samsung's WebView sandbox blocks `http://localhost` even as a `loadDataWithBaseURL` base URL — no HTTP to localhost is safe on Samsung Android 14.
@@ -372,4 +379,4 @@ camnet/
 
 ---
 
-**Last Updated:** May 2026 (v1.61 — Samsung HTTPS-only Monitor load, onReceivedError diagnostics)
+**Last Updated:** May 2026 (v1.62 — CamNet cert trusted at OS level, SslProxy race fix)
