@@ -11,8 +11,8 @@ android {
         applicationId "com.camnet.app"
         minSdk 29
         targetSdk 34
-        versionCode 16
-        versionName "1.84"
+        versionCode 17
+        versionName "1.85"
     }
 
     signingConfigs {
@@ -67,6 +67,38 @@ task copyWebAssets(type: Copy) {
     from '../../public'
     into 'src/main/assets/public'
 }
+
+// Always extract the current cert from camnet-ssl.p12 so res/raw/camnet_ssl_cert.pem
+// stays in sync — prevents "server presents new cert, Android trusts old pinned cert" failures.
+def extractSslCert = tasks.register('extractSslCert') {
+    def p12File = file("src/main/assets/camnet-ssl.p12")
+    def pemFile = file("src/main/res/raw/camnet_ssl_cert.pem")
+    inputs.file(p12File)
+    outputs.file(pemFile)
+    doLast {
+        if (!p12File.exists()) {
+            println "camnet-ssl.p12 not found — skipping cert extraction"
+            return
+        }
+        def ks    = java.security.KeyStore.getInstance("PKCS12")
+        p12File.withInputStream { ks.load(it, "camnet-ssl".toCharArray()) }
+        def alias = ks.aliases().nextElement()
+        def cert  = ks.getCertificate(alias)
+        def b64   = java.util.Base64.getEncoder().encodeToString(cert.encoded)
+        def pem   = "-----BEGIN CERTIFICATE-----\n" +
+            b64.replaceAll("(.{64})", '$1\n').replaceAll("\n+\$", '') +
+            "\n-----END CERTIFICATE-----\n"
+        pemFile.parentFile.mkdirs()
+        pemFile.text = pem
+        println "Extracted SSL cert from p12 → ${pemFile.name}"
+    }
+}
+
 afterEvaluate {
     preBuild.dependsOn copyWebAssets
+    tasks.configureEach { task ->
+        if (task.name ==~ /compile.*Kotlin|compile.*Java|process.*Resources|merge.*Assets/) {
+            task.dependsOn(extractSslCert)
+        }
+    }
 }

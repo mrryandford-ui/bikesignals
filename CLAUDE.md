@@ -111,6 +111,10 @@ CamNet is a peer-to-peer multi-phone LAN security camera app. One phone acts as 
 - ✅ **No way to reset persisted settings (viewer.js + viewer.html):**
   - "Reset to defaults" button at bottom of settings panel. Confirms, then clears all `camnet.viewer.*` localStorage keys and reloads.
 
+### Fixed (v1.85 — auto-sync SSL cert + WS diagnostics)
+- ✅ **Stale pinned cert causing WSS failure (build.gradle):** Added `extractSslCert` Gradle task that reads `camnet-ssl.p12`, extracts the current cert, and writes `res/raw/camnet_ssl_cert.pem` at build time. Runs before all compile/process tasks via `configureEach`. Cert in NSC trust anchor now always matches what the server actually presents.
+- ✅ **WebSocket diagnostic logging (viewer.js `connectWS()`):** Logs URL, open, close (code+reason), and error events to `logDiagnostic` (→ `crash_report.txt`) and console. On WS error, shows `WS-ERR` in the session code box so failures are visible without USB debugging.
+
 ### Fixed (v1.84 — bypass Samsung fetch() SSL bug for LAN IP detection)
 - ✅ **Root cause: Samsung WebView fetch() has a separate SSL validation path that ignores NSC cert anchors (known Samsung bug).** fetch('/api/info') silently fails → no LAN IP → no QR → session code blank (WS only called after fetch chain, so also fails).
 - ✅ **Fix: Kotlin passes LAN IP in URL fragment (AndroidBridge.kt + CamNetServer.kt):** After SSL port probe, `CamNetServer.getLanIP()` (new companion object function) gets the best RFC1918 IP. `loadUrl("https://localhost:3443/viewer.html#lan=192.168.x.x")` passes it without any fetch.
@@ -493,4 +497,4 @@ camnet/
 
 ---
 
-**Last Updated:** May 2026 (v1.84 — bypass Samsung fetch() SSL bug via URL fragment LAN IP)
+**Last Updated:** May 2026 (v1.85 — auto-sync SSL cert at build time, WS diagnostics)

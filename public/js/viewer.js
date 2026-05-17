@@ -193,9 +193,15 @@ async function runSmartDetection(video) {
 // ── WebSocket ──────────────────────────────────────────────────
 function connectWS() {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  ws = new WebSocket(`${proto}//${location.host}`);
+  const wsUrl = `${proto}//${location.host}`;
+  console.log('[CamNet] WS connecting to:', wsUrl);
+  try { window.AndroidBridge?.logDiagnostic?.('WS connecting: ' + wsUrl); } catch (_) {}
+
+  ws = new WebSocket(wsUrl);
 
   ws.onopen = () => {
+    console.log('[CamNet] WS connected');
+    try { window.AndroidBridge?.logDiagnostic?.('WS connected OK'); } catch (_) {}
     setWsStatus('connected');
     startPing();
     const saved = sessionStorage.getItem('camnet_room');
@@ -210,13 +216,26 @@ function connectWS() {
     onMessage(msg);
   };
 
-  ws.onclose = () => {
+  ws.onclose = (e) => {
+    console.warn('[CamNet] WS closed code=' + e.code + ' reason=' + e.reason);
+    try { window.AndroidBridge?.logDiagnostic?.('WS closed code=' + e.code + ' reason=' + (e.reason || 'none')); } catch (_) {}
     stopPing();
     setWsStatus('disconnected');
     setTimeout(connectWS, 3000);
   };
 
-  ws.onerror = () => ws.close();
+  ws.onerror = (e) => {
+    console.error('[CamNet] WS error:', e.type);
+    try { window.AndroidBridge?.logDiagnostic?.('WS error: ' + e.type); } catch (_) {}
+    // Show visible indicator in session code box if still blank
+    const rc = document.getElementById('roomCode');
+    if (rc && (rc.textContent === '------' || rc.textContent === '')) {
+      rc.textContent = 'WS-ERR';
+      rc.style.color = '#ef4444';
+      rc.style.fontSize = '14px';
+    }
+    ws.close();
+  };
 }
 
 function wsSend(obj) {
