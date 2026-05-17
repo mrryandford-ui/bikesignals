@@ -88,7 +88,7 @@ class CamNetServer(port: Int, private val assets: AssetManager, private val cont
         }
         routing {
             webSocket("/")         {
-                val ip = try { call.request.origin.remoteHost } catch (_: Exception) { "unknown" }
+                val ip = try { call.request.local.remoteHost } catch (_: Exception) { "unknown" }
                 handleSocket(this, ip)
             }
             get("/api/info")       { serveApiInfo(call) }
