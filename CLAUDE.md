@@ -111,6 +111,18 @@ CamNet is a peer-to-peer multi-phone LAN security camera app. One phone acts as 
 - ✅ **No way to reset persisted settings (viewer.js + viewer.html):**
   - "Reset to defaults" button at bottom of settings panel. Confirms, then clears all `camnet.viewer.*` localStorage keys and reloads.
 
+### Fixed (v1.74 — Samsung mic unavailable on connect)
+- ✅ **5-tier getUserMedia audio fallback (camera.js `initMedia()`):**
+  - T1: `{echoCancellation:true, noiseSuppression:true}` (ideal)
+  - T2: `audio:true` (device chooses processing)
+  - T3: separate `getUserMedia({video})` + `getUserMedia({audio:true})` calls — avoids combined-constraint rejection on Samsung
+  - T4: `{audio:{sampleRate:16000}}` minimal constraints
+  - T5 (video-only fallback): if all audio tiers fail, stream without audio, show toast, set `micEnabled=false`
+  - Each failure reason captured and logged to console + `crash_report.txt` via `AndroidBridge.logDiagnostic`
+- ✅ **150ms permission propagation delay (camera.js `startJoin()`):** Added before `initMedia()` call. Android WebView on some Samsung devices lags permission state by ~1 event loop tick after `onPermissionRequest` grants access.
+- ✅ **`AndroidBridge.logDiagnostic(message)` (AndroidBridge.kt):** Appends timestamped entry to `crash_report.txt` and writes to logcat. Used by camera.js to surface `getUserMedia` failure reasons in the next shared crash report.
+- ✅ **FIX 3 confirmed:** `StreamingService` already has `foregroundServiceType="camera|microphone"` and `RECORD_AUDIO` is in `requestPermissions()` — no change needed.
+
 ### Fixed (v1.73 — Sprint 4A Security hardening)
 - ✅ **8-char room code with SecureRandom (CamNetServer.kt + server.js):** `roomCode()` now uses `SecureRandom` (Kotlin) / `crypto.randomInt` (Node) with custom alphabet `ABCDEFGHJKLMNPQRSTUVWXYZ23456789` (omits O/0/I/1 for readability). 32⁸ ≈ 1.1 trillion combinations.
 - ✅ **Join nonce (all files):** `sessionSecret()` generates 128-bit hex nonce per room. Included in `room-created`/`room-rejoined` messages. Viewer stores as `roomNonce`, includes in QR/share URL as `?nonce=HEX`. Camera reads from URL, sends in `join-room`. Server rejects with `BAD_TOKEN` if nonce missing or wrong.
@@ -450,4 +462,4 @@ camnet/
 
 ---
 
-**Last Updated:** May 2026 (v1.73 — Sprint 4A security hardening)
+**Last Updated:** May 2026 (v1.74 — Samsung mic fix, 5-tier audio fallback)

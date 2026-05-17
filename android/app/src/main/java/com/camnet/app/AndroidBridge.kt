@@ -16,6 +16,19 @@ class AndroidBridge(
     private val context: Context,
     private val onLoadUrl: (String) -> Unit,
 ) {
+    /** Appends a diagnostic message to crash_report.txt and logcat for debugging. */
+    @JavascriptInterface
+    fun logDiagnostic(message: String) {
+        android.util.Log.d("CamNet", "JS diagnostic: $message")
+        try {
+            val entry = "[${java.time.LocalDateTime.now()}] $message\n"
+            java.io.File(
+                (context as? MainActivity)?.filesDir ?: return,
+                "crash_report.txt"
+            ).appendText(entry)
+        } catch (_: Exception) {}
+    }
+
     /** Called from any screen's back/home button to navigate to the home screen. */
     @JavascriptInterface
     fun goHome() {

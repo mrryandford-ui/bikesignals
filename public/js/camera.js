@@ -100,6 +100,9 @@ async function startJoin() {
   cancelGiveUpTimer();
   // Create AudioContext here — must be inside a user gesture
   _initAudioCtx();
+  // Give the Android permission grant time to propagate before getUserMedia fires.
+  // WebView quirk on some Samsung devices — permission state lags by ~1 event loop tick.
+  await new Promise(resolve => setTimeout(resolve, 150));
   try {
     await initMedia();
     connectWS();
@@ -121,22 +124,67 @@ async function initMedia() {
       height:     { ideal: q.height },
       frameRate:  { ideal: q.frameRate },
     };
-    const audio = { echoCancellation: true, noiseSuppression: true };
 
     if (localStream) localStream.getTracks().forEach(t => t.stop());
 
+    let audioErr1, audioErr2, audioErr3, audioErr4;
+
+    // Tier 1: ideal — specific audio processing constraints
     try {
-      localStream = await navigator.mediaDevices.getUserMedia({ video, audio });
-    } catch {
+      localStream = await navigator.mediaDevices.getUserMedia({
+        video, audio: { echoCancellation: true, noiseSuppression: true }
+      });
+    } catch (e1) {
+      audioErr1 = e1.name + ': ' + e1.message;
+      // Tier 2: basic audio, let device choose processing
       try {
-        // Specific constraints rejected — try basic audio (device chooses format)
         localStream = await navigator.mediaDevices.getUserMedia({ video, audio: true });
-      } catch {
-        // No mic at all — stream video only
-        localStream = await navigator.mediaDevices.getUserMedia({ video, audio: false });
-        micEnabled = false;
-        showToast('Mic unavailable — video only');
+      } catch (e2) {
+        audioErr2 = e2.name + ': ' + e2.message;
+        // Tier 3: separate video + audio calls (avoids combined-constraint rejection)
+        let vStream;
+        try {
+          vStream = await navigator.mediaDevices.getUserMedia({ video });
+        } catch (e5) {
+          // Total failure — camera unavailable, surface as a real error
+          throw new Error(
+            'Camera unavailable. Check permissions.\nAudio errors: ' +
+            [audioErr1, audioErr2].filter(Boolean).join(' | ')
+          );
+        }
+        try {
+          const aStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          aStream.getAudioTracks().forEach(t => vStream.addTrack(t));
+        } catch (e3) {
+          audioErr3 = e3.name + ': ' + e3.message;
+          // Tier 4: minimal audio constraints
+          try {
+            const aStream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000 } });
+            aStream.getAudioTracks().forEach(t => vStream.addTrack(t));
+          } catch (e4) {
+            audioErr4 = e4.name + ': ' + e4.message;
+          }
+        }
+        localStream = vStream;
+        micEnabled = localStream.getAudioTracks().length > 0;
+        if (!micEnabled) {
+          console.warn('Mic fallback exhausted:', { audioErr1, audioErr2, audioErr3, audioErr4 });
+          showToast('Mic unavailable — check app permissions');
+        }
       }
+    }
+
+    // Log audio failures to crash_report.txt via AndroidBridge if any tier failed
+    if (audioErr1) {
+      console.warn('getUserMedia audio attempts:', { audioErr1, audioErr2, audioErr3, audioErr4 });
+      try {
+        window.AndroidBridge?.logDiagnostic?.(
+          'getUserMedia audio: t1=' + audioErr1 +
+          (audioErr2 ? ' t2=' + audioErr2 : '') +
+          (audioErr3 ? ' t3=' + audioErr3 : '') +
+          (audioErr4 ? ' t4=' + audioErr4 : '')
+        );
+      } catch (_) {}
     }
 
     const vid = document.getElementById('localVideo');
