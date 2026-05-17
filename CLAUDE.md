@@ -111,6 +111,12 @@ CamNet is a peer-to-peer multi-phone LAN security camera app. One phone acts as 
 - ✅ **No way to reset persisted settings (viewer.js + viewer.html):**
   - "Reset to defaults" button at bottom of settings panel. Confirms, then clears all `camnet.viewer.*` localStorage keys and reloads.
 
+### Fixed (v1.63 — Tailscale / RFC 6598 IP handling)
+- ✅ **"Blocked SSL from untrusted host: 100.81.68.x" toast on Tailscale devices (MainActivity.kt `isPrivateHost()`):**
+  - Added RFC 6598 range `100.64.0.0/10` (CGNAT / Tailscale) to `isPrivateHost()`. `onReceivedSslError` now proceeds for Tailscale IPs.
+- ✅ **Tailscale IP shown as primary in QR code instead of WiFi IP (CamNetServer.kt `localIPs()`):**
+  - `localIPs()` now separates RFC1918 IPs (10.x, 172.16-31.x, 192.168.x) from 100.x CGNAT IPs and returns RFC1918 first. QR code and session URL show the WiFi address camera phones on the same network can actually reach. Falls back to all IPs if no RFC1918 address exists.
+
 ### Fixed (v1.62 — Monitor SSL definitive fix)
 - ✅ **fetch() and WebSocket SSL failures on Samsung Android 14 (network_security_config.xml + AndroidBridge.kt):**
   - Root cause 1: `onReceivedSslError` only intercepts the main document SSL error on Samsung. fetch() and WebSocket SSL errors bypass it entirely → `/api/info` and the signaling WebSocket both silently failed → no room code, no IP list shown.
@@ -379,4 +385,4 @@ camnet/
 
 ---
 
-**Last Updated:** May 2026 (v1.62 — CamNet cert trusted at OS level, SslProxy race fix)
+**Last Updated:** May 2026 (v1.63 — Tailscale/RFC6598 IP handling)
