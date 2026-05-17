@@ -198,8 +198,9 @@ class MainActivity : AppCompatActivity() {
             getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS),
             "CamNet-v${version}.apk"
         )
-        if (!file.exists()) {
-            runOnUiThread { android.widget.Toast.makeText(this, "APK not found: ${file.path}", android.widget.Toast.LENGTH_LONG).show() }
+        android.util.Log.i("CamNet", "Install file: ${file.path} exists=${file.exists()} size=${file.length()}")
+        if (!file.exists() || file.length() == 0L) {
+            runOnUiThread { android.widget.Toast.makeText(this, "APK download incomplete — try again", android.widget.Toast.LENGTH_LONG).show() }
             return
         }
         val uri = androidx.core.content.FileProvider.getUriForFile(this, "${packageName}.provider", file)
