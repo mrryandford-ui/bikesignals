@@ -44,18 +44,21 @@ class MainActivity : AppCompatActivity() {
         }
 
         webView.addJavascriptInterface(
-            AndroidBridge(this) { url -> webView.loadUrl(url) },
+            AndroidBridge(this, ::onLoadUrl),
             "AndroidBridge"
         )
 
         webView.webViewClient = object : WebViewClient() {
             @SuppressLint("WebViewClientOnReceivedSslError")
             override fun onReceivedSslError(view: WebView, handler: SslErrorHandler, error: SslError) {
-                val host = error.url?.let { runCatching { java.net.URL(it).host }.getOrNull() } ?: ""
-                if (isPrivateHost(host)) handler.proceed() else {
+                val url     = error.url ?: ""
+                val urlHost = runCatching { java.net.URI(url).host }.getOrNull() ?: ""
+                val trusted = isPrivateHost(urlHost)
+                android.util.Log.w("CamNet", "SSL error for '$urlHost' trusted=$trusted url=$url")
+                if (trusted) handler.proceed() else {
                     handler.cancel()
                     android.widget.Toast.makeText(this@MainActivity,
-                        "Blocked SSL from untrusted host: $host", android.widget.Toast.LENGTH_LONG).show()
+                        "Blocked SSL from untrusted host: $urlHost", android.widget.Toast.LENGTH_LONG).show()
                 }
             }
 
@@ -237,6 +240,17 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ── Navigation ────────────────────────────────────────────────
+    fun onLoadUrl(url: String) {
+        android.util.Log.i("CamNet", "onLoadUrl: $url")
+        try {
+            webView.loadUrl(url)
+        } catch (e: Exception) {
+            android.util.Log.e("CamNet", "onLoadUrl failed: $e")
+            android.widget.Toast.makeText(this, "Failed to load: $url\n$e",
+                android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
+
     fun showHome() {
         // Clear back-stack so the Monitor → Back → Camera flow always renders a
         // fresh screen and never resurrects a stale data:// page from history.

@@ -111,6 +111,10 @@ CamNet is a peer-to-peer multi-phone LAN security camera app. One phone acts as 
 - ✅ **No way to reset persisted settings (viewer.js + viewer.html):**
   - "Reset to defaults" button at bottom of settings panel. Confirms, then clears all `camnet.viewer.*` localStorage keys and reloads.
 
+### Fixed (v1.89 — onLoadUrl logging + SSL error diagnostics)
+- ✅ **`onLoadUrl` was a silent anonymous lambda (MainActivity.kt):** Extracted into named `onLoadUrl(url: String)` function with `Log.i` on entry and `Log.e` + Toast on exception. `AndroidBridge` now wired via `::onLoadUrl` reference.
+- ✅ **`onReceivedSslError` used `java.net.URL` for host extraction (MainActivity.kt):** `URL` throws on non-HTTP schemes and strips brackets from IPv6. Switched to `java.net.URI` which handles all URL forms. Added `Log.w` line showing `urlHost trusted=true/false` for every SSL event — visible in logcat without USB adb grep.
+
 ### Fixed (v1.86 — JS TDZ crash + WebSocket plain-port bypass)
 - ✅ **`alertSound` used before initialization — JS crashes on load (viewer.js):** `let alertSound/alertVibration/alertCooldown` were declared at line ~1019 but assigned via `lsLoad()` at line 129 (temporal dead zone). Moved all three declarations to the top of the file alongside the other settings variables, before any code runs.
 - ✅ **WebSocket SSL cert invalid on Samsung — `wss://localhost:3443` fails (AndroidBridge.kt + viewer.js):** p12 cert is unchanged (confirmed identical). Root cause: Samsung WebView's JS network stack doesn't trust NSC cert anchors for JS-initiated WebSocket connections. Fix: Kotlin passes `wsport=PORT` in the URL fragment alongside `lan=IP`. viewer.js uses `ws://localhost:PORT` (plain, no SSL) when `wsport` is present and `AndroidBridge` is defined. Chrome/WebView allows `ws://localhost` from `https://` pages via the localhost mixed-content exemption — no cert needed.
@@ -501,4 +505,4 @@ camnet/
 
 ---
 
-**Last Updated:** May 2026 (v1.86 — JS TDZ crash fix, WebSocket plain-port bypass)
+**Last Updated:** May 2026 (v1.89 — onLoadUrl logging, SSL error diagnostics)
