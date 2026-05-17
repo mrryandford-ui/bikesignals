@@ -10,9 +10,13 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
   <link rel="stylesheet" href="/css/app.css">
   <script>
-    // If opened on localhost, bounce to the real LAN IP immediately.
-    // Runs before anything else so the address bar, QR, and WS all use the real IP.
-    if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+    // If opened on localhost in a BROWSER (not the Android app), bounce to the real
+    // LAN IP so the address bar and WS use the real IP.
+    // Skip in the Android app — the self-signed cert is only trusted for localhost
+    // via NSC, so navigating to the LAN IP would break fetch and WebSocket SSL.
+    // viewer.js handles LAN IP detection independently for the QR code.
+    if (!window.AndroidBridge &&
+        (location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
       fetch('/api/info')
         .then(r => r.json())
         .then(d => {

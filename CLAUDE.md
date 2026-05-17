@@ -111,6 +111,14 @@ CamNet is a peer-to-peer multi-phone LAN security camera app. One phone acts as 
 - ✅ **No way to reset persisted settings (viewer.js + viewer.html):**
   - "Reset to defaults" button at bottom of settings panel. Confirms, then clears all `camnet.viewer.*` localStorage keys and reloads.
 
+### Fixed (v1.79 — Blank room code / LAN IP not detected on Android)
+- ✅ **Root cause: viewer.html redirect navigated from localhost to LAN IP, breaking SSL (viewer.html):**
+  - The inline redirect script (opens `https://LAN_IP:3443` when on localhost) was causing viewer.js `fetch('/api/info')` and WebSocket to connect to the LAN IP. The self-signed cert is only trusted for `localhost` via NSC — not for the LAN IP — so both JS fetch and WS SSL failed silently, leaving room code blank.
+  - Fix: skip the redirect when `window.AndroidBridge` is present. viewer.js already fetches `/api/info` independently and uses the LAN IP only for the QR URL, without redirecting the page.
+- ✅ **Silent fetch failure hid the error (viewer.js):**
+  - `.catch(() => {})` swallowed fetch errors with no feedback.
+  - Now shows "⚠ Could not detect LAN IP — use session code only" in the session panel, logs to `crash_report.txt` via `logDiagnostic`, and still calls `connectWS()` so the room code appears regardless.
+
 ### Fixed (v1.74 — Samsung mic unavailable on connect)
 - ✅ **5-tier getUserMedia audio fallback (camera.js `initMedia()`):**
   - T1: `{echoCancellation:true, noiseSuppression:true}` (ideal)
@@ -462,4 +470,4 @@ camnet/
 
 ---
 
-**Last Updated:** May 2026 (v1.74 — Samsung mic fix, 5-tier audio fallback)
+**Last Updated:** May 2026 (v1.79 — blank room code fix, LAN IP redirect suppressed on Android)

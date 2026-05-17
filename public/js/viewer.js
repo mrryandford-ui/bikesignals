@@ -2151,5 +2151,14 @@ fetch('/api/info')
       box.style.display = 'block';
     }
   })
-  .catch(() => {})
+  .catch((err) => {
+    console.error('api/info fetch failed:', err);
+    try { window.AndroidBridge?.logDiagnostic?.('api/info failed: ' + err); } catch (_) {}
+    const disp = document.getElementById('serverUrlDisplay');
+    if (disp) {
+      disp.textContent = '⚠ Could not detect LAN IP — use session code only';
+      disp.style.color = 'var(--accent-r)';
+      document.getElementById('serverUrlBox').style.display = 'block';
+    }
+  })
   .finally(() => connectWS());
