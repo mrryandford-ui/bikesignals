@@ -72,11 +72,12 @@ function formatDurationMs(ms) {
 
 // ── Motion detection sensitivity thresholds ────────────────────
 const SENS = {
-  low:  { pixelDiff: 35, fraction: 0.04 },
-  mid:  { pixelDiff: 25, fraction: 0.025 },
-  high: { pixelDiff: 15, fraction: 0.01 },
+  low:  { pixelDiff: 30, fraction: 0.02  }, // large changes only, filters compression noise
+  mid:  { pixelDiff: 20, fraction: 0.01  },
+  high: { pixelDiff: 15, fraction: 0.005 },
 };
-const MOTION_COOLDOWN_MS = 15_000; // min ms between alerts per camera
+const MOTION_COOLDOWN_MS      = 8_000; // min ms between alerts per camera
+const MOTION_CONSECUTIVE_REQ  = 3;     // frames above threshold required before alert fires
 
 // ── AI smart detection (COCO-SSD via TensorFlow.js, on-device) ─
 let smartDetectionEnabled = false;
@@ -294,7 +295,7 @@ function onCameraJoined(cameraId, name) {
     if (pc.iceConnectionState === 'failed') pc.restartIce();
   };
 
-  peers.set(cameraId, { pc, name, stream: null, recorder: null, motion: null, facingMode: null, torchOn: false, quality: 720, stealth: false, recordTarget: null, recDurationMs: 0, recStartTime: 0, recSegNum: 0, recBaseName: '', recChunks: [], recSegTimer: null, recDurationTimer: null, zone: null, lastMotionAt: 0, motionFlashActive: false, motionFlashTimer: null, timelapse: null });
+  peers.set(cameraId, { pc, name, stream: null, recorder: null, motion: null, facingMode: null, torchOn: false, quality: 720, stealth: false, recordTarget: null, recDurationMs: 0, recStartTime: 0, recSegNum: 0, recBaseName: '', recChunks: [], recSegTimer: null, recDurationTimer: null, zone: null, lastMotionAt: 0, motionConsecutive: 0, motionFlashActive: false, motionFlashTimer: null, timelapse: null });
   addCameraCard(cameraId, name);
   updateCamCount();
 }
@@ -1006,9 +1007,18 @@ function startMotion(cameraId) {
       }
 
       const now = Date.now();
-      if (total > 0 && changed / total > fraction && now >= peer.lastMotionAt + MOTION_COOLDOWN_MS) {
+      const aboveThreshold = total > 0 && changed / total > fraction;
+
+      if (aboveThreshold) {
+        peer.motionConsecutive = (peer.motionConsecutive || 0) + 1;
+      } else {
+        peer.motionConsecutive = 0;
+      }
+
+      if (peer.motionConsecutive >= MOTION_CONSECUTIVE_REQ &&
+          now >= peer.lastMotionAt + MOTION_COOLDOWN_MS) {
+        peer.motionConsecutive = 0; // reset after firing
         if (smartDetectionEnabled && cocoModel && !peer.pendingSmartDetect) {
-          // AI mode: only alert if a tracked class is actually present.
           if (now < (peer.lastSmartAt || 0) + SMART_DETECTION_COOLDOWN_MS) {
             // skip — too soon since last inference
           } else {
@@ -1019,14 +1029,15 @@ function startMotion(cameraId) {
               if (matches && matches.length > 0) {
                 const best = matches.reduce((a, b) => a.score > b.score ? a : b);
                 showMotionAlert(cameraId, best.class);
+                fireNativeMotionAlert(cameraId);
                 clearTimeout(alertTimeout);
                 alertTimeout = setTimeout(() => hideMotionAlert(cameraId), 4000);
               }
             });
           }
         } else if (!smartDetectionEnabled || !cocoModel) {
-          // Fire basic alert when AI is off, OR when AI is on but model hasn't loaded yet.
           showMotionAlert(cameraId);
+          fireNativeMotionAlert(cameraId);
           clearTimeout(alertTimeout);
           alertTimeout = setTimeout(() => hideMotionAlert(cameraId), 4000);
         }
@@ -1107,6 +1118,26 @@ function showMotionAlert(cameraId, detectedClass) {
 
 function hideMotionAlert(cameraId) {
   document.querySelector(`#card-${cameraId} .motion-alert`)?.classList.remove('visible');
+}
+
+// Fires a native Android OS notification via AndroidBridge so alerts arrive
+// when the app is backgrounded, screen is off, or user is in another app.
+function fireNativeMotionAlert(cameraId) {
+  const peer = peers.get(cameraId);
+  if (!peer || !window.AndroidBridge?.fireMotionAlert) return;
+  const name = peer.name || ('Camera ' + cameraId);
+  let snapshotBase64 = '';
+  try {
+    const video = document.querySelector(`#card-${cameraId} video`);
+    if (video && video.videoWidth > 0) {
+      const cvs = document.createElement('canvas');
+      cvs.width  = 320;
+      cvs.height = Math.round(320 * video.videoHeight / video.videoWidth);
+      cvs.getContext('2d').drawImage(video, 0, 0, cvs.width, cvs.height);
+      snapshotBase64 = cvs.toDataURL('image/jpeg', 0.6);
+    }
+  } catch (_) {}
+  window.AndroidBridge.fireMotionAlert(name, snapshotBase64);
 }
 
 // ── Motion flash ───────────────────────────────────────────────
@@ -1748,10 +1779,16 @@ document.querySelectorAll('.panel-backdrop, .panel-close').forEach(el => {
 document.getElementById('layoutBtn').addEventListener('click',  () => openPanel('layoutPanel'));
 document.getElementById('sessionBtn').addEventListener('click', () => openPanel('sessionPanel'));
 document.getElementById('settingsBtn').addEventListener('click', () => {
+  // Sync all toggle UI states to current values before opening
+  document.getElementById('globalMotionToggle').classList.toggle('on', globalMotion);
+  document.getElementById('motionAutoSnapToggle').classList.toggle('on', motionAutoSnap);
+  document.getElementById('motionFlashToggle').classList.toggle('on', motionFlash);
+  document.getElementById('smartDetectionToggle').classList.toggle('on', smartDetectionEnabled);
+  document.getElementById('muteAllToggle').classList.toggle('on', muteAll);
+  document.getElementById('mirrorToggle').classList.toggle('on', mirrorFront);
   openPanel('settingsPanel');
-  if ('Notification' in window && Notification.permission === 'default') {
-    Notification.requestPermission().then(p => { motionNotifEnabled = p === 'granted'; });
-  }
+  // Web Notification permission not needed — native AndroidBridge.fireMotionAlert
+  // fires OS notifications directly via NotificationManager, bypassing the Web API.
 });
 
 // Layout selector

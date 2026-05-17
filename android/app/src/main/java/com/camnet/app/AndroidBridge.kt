@@ -1,8 +1,14 @@
 package com.camnet.app
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
+import android.provider.Settings
 import android.webkit.JavascriptInterface
+import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import kotlin.concurrent.thread
 
@@ -160,6 +166,69 @@ class AndroidBridge(
         (context as? MainActivity)?.runOnUiThread {
             (context as? MainActivity)?.showSetup()
         }
+    }
+
+    /**
+     * Called from viewer.js when motion is detected. Fires a high-priority Android
+     * notification visible on lock screen / when app is backgrounded, with optional
+     * snapshot thumbnail. Each camera gets its own notification slot keyed by name.
+     */
+    @JavascriptInterface
+    fun fireMotionAlert(cameraName: String, snapshotBase64: String?) {
+        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+        val channel = NotificationChannel(
+            "camnet_motion", "Motion Alerts", NotificationManager.IMPORTANCE_HIGH
+        ).apply {
+            description = "Motion detected on camera"
+            enableVibration(true)
+            vibrationPattern = longArrayOf(0, 250, 100, 250)
+            enableLights(true)
+            setShowBadge(true)
+            val attrs = AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_NOTIFICATION_EVENT)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .build()
+            setSound(Settings.System.DEFAULT_NOTIFICATION_URI, attrs)
+        }
+        nm.createNotificationChannel(channel)
+
+        val tapIntent = PendingIntent.getActivity(
+            context, 0,
+            Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            },
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        val builder = NotificationCompat.Builder(context, "camnet_motion")
+            .setSmallIcon(android.R.drawable.ic_menu_camera)
+            .setContentTitle("Motion detected")
+            .setContentText(cameraName)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setAutoCancel(true)
+            .setContentIntent(tapIntent)
+            .setDefaults(NotificationCompat.DEFAULT_SOUND or NotificationCompat.DEFAULT_VIBRATE)
+
+        if (!snapshotBase64.isNullOrEmpty()) {
+            try {
+                val bytes = android.util.Base64.decode(
+                    snapshotBase64.substringAfter(","), android.util.Base64.DEFAULT
+                )
+                val bmp = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                if (bmp != null) {
+                    builder.setLargeIcon(bmp)
+                    builder.setStyle(
+                        NotificationCompat.BigPictureStyle()
+                            .bigPicture(bmp)
+                            .bigLargeIcon(null as android.graphics.Bitmap?)
+                    )
+                }
+            } catch (_: Exception) {}
+        }
+
+        nm.notify(cameraName.hashCode(), builder.build())
     }
 
     /**

@@ -111,6 +111,20 @@ CamNet is a peer-to-peer multi-phone LAN security camera app. One phone acts as 
 - ✅ **No way to reset persisted settings (viewer.js + viewer.html):**
   - "Reset to defaults" button at bottom of settings panel. Confirms, then clears all `camnet.viewer.*` localStorage keys and reloads.
 
+### Fixed (v1.70 — Motion detection overhaul + native push notifications)
+- ✅ **Settings panel toggles show wrong state on open (viewer.js):**
+  - All six toggles (`globalMotionToggle`, `motionAutoSnapToggle`, `motionFlashToggle`, `smartDetectionToggle`, `muteAllToggle`, `mirrorToggle`) now sync to current variable state via `classList.toggle('on', value)` before `openPanel()` fires.
+  - Removed redundant `Notification.requestPermission()` from settings open handler — native notifications bypass the Web Notification API entirely.
+- ✅ **Motion detection false positives (viewer.js):**
+  - **Temporal smoothing:** alert only fires after `MOTION_CONSECUTIVE_REQ = 3` consecutive above-threshold frames; single-frame flickers/artifacts are ignored. `peer.motionConsecutive` counter resets on below-threshold frame and after alert fires.
+  - **Tighter SENS thresholds:** `low { pixelDiff:30, fraction:0.02 }`, `mid { pixelDiff:20, fraction:0.01 }`, `high { pixelDiff:15, fraction:0.005 }` — pixel delta floor filters compression noise that rarely exceeds 15.
+  - **Cooldown reduced:** `MOTION_COOLDOWN_MS` 15s → 8s.
+- ✅ **Motion alerts invisible when app is backgrounded (AndroidBridge.kt + viewer.js):**
+  - `AndroidBridge.fireMotionAlert(cameraName, snapshotBase64)` JavascriptInterface fires a `IMPORTANCE_HIGH` notification via Android `NotificationManager` with vibration, sound, and optional JPEG thumbnail. Works when app is backgrounded, screen is off, or user is in another app.
+  - `fireNativeMotionAlert(cameraId)` in viewer.js captures a 320px JPEG snapshot from the live video and calls the bridge. Called alongside `showMotionAlert` on every alert trigger (both basic and AI-detected).
+  - Added `USE_FULL_SCREEN_INTENT` permission to `AndroidManifest.xml` for heads-up on locked screen.
+  - `POST_NOTIFICATIONS` already present from Sprint 1.
+
 ### Fixed (v1.63 — Tailscale / RFC 6598 IP handling)
 - ✅ **"Blocked SSL from untrusted host: 100.81.68.x" toast on Tailscale devices (MainActivity.kt `isPrivateHost()`):**
   - Added RFC 6598 range `100.64.0.0/10` (CGNAT / Tailscale) to `isPrivateHost()`. `onReceivedSslError` now proceeds for Tailscale IPs.
@@ -385,4 +399,4 @@ camnet/
 
 ---
 
-**Last Updated:** May 2026 (v1.69 — version/build number sync restored)
+**Last Updated:** May 2026 (v1.70 — motion detection overhaul, native push notifications)
