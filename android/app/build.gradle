@@ -11,8 +11,8 @@ android {
         applicationId "com.camnet.app"
         minSdk 29
         targetSdk 34
-        versionCode 15
-        versionName "1.83"
+        versionCode 16
+        versionName "1.84"
     }
 
     signingConfigs {

@@ -2118,59 +2118,60 @@ function escHtml(s) {
 }
 
 // ── Boot ───────────────────────────────────────────────────────
-// Fetch LAN IP before connecting so the QR is correct from the start.
-// /api/info is excluded from SW cache so this is always fresh.
-fetch('/api/info')
-  .then(r => r.json())
-  .then(d => {
-    // Camera phones connect via the SSL proxy, not the viewer's own HTTP port.
-    const sslPort = d.sslPort || 3443;
+// Android (Kotlin) passes the LAN IP in the URL fragment to avoid
+// Samsung WebView's broken fetch() SSL path with self-signed certs.
+// Browser fallback: fetch /api/info normally.
+(function boot() {
+  const fragParams = new URLSearchParams(location.hash.slice(1));
+  const fragIP     = fragParams.get('lan');
+
+  function showIP(ip, sslPort) {
     const box  = document.getElementById('serverUrlBox');
     const disp = document.getElementById('serverUrlDisplay');
+    if (!disp) return;
+    const url = `https://${ip}:${sslPort}`;
+    disp.innerHTML = `<div style="padding:3px 0;cursor:pointer" data-url="${url}">✓ ${url}</div>`;
+    disp.addEventListener('click', (e) => {
+      const row = e.target.closest('[data-url]');
+      if (!row) return;
+      const chosenURL = row.dataset.url;
+      window._lanIP = new URL(chosenURL).hostname;
+      const nonceParam = roomNonce ? `&nonce=${roomNonce}` : '';
+      joinURL = `${chosenURL}/?room=${roomId}${nonceParam}`;
+      buildQR(joinURL);
+      disp.querySelectorAll('[data-url]').forEach(r => r.textContent = '  ' + r.dataset.url);
+      row.textContent = '✓ ' + chosenURL;
+      copyToClipboard(joinURL, 'Link copied!');
+    });
+    if (box) box.style.display = 'block';
+  }
 
-    // Use best-guess IP for QR; show ALL detected IPs so user can pick if wrong
-    const ips = d.lanIP
-      ? [d.lanIP, ...(d.allIPs || []).map(i => i.address).filter(a => a !== d.lanIP)]
-      : (d.allIPs || []).map(i => i.address);
-
-    if (ips.length === 0) {
-      disp.textContent = '⚠ No network IP found — are you on WiFi?';
-      disp.style.color = 'var(--accent-r)';
-      box.style.display = 'block';
-    } else {
-      window._lanIP    = ips[0];
-      window._sslPort  = sslPort;
-      disp.innerHTML = ips.map((ip, i) => {
-        const url = `https://${ip}:${sslPort}`;
-        const label = i === 0 ? '✓ ' : '  ';
-        return `<div style="padding:3px 0;cursor:pointer" data-url="${url}">${label}${url}</div>`;
-      }).join('');
-      // Tap any IP line to set it as the active one
-      disp.addEventListener('click', (e) => {
-        const row = e.target.closest('[data-url]');
-        if (!row) return;
-        const chosenURL = row.dataset.url;
-        const chosenIP  = new URL(chosenURL).hostname;
-        window._lanIP = chosenIP;
-        const nonceParam = roomNonce ? `&nonce=${roomNonce}` : '';
-        joinURL = `${chosenURL}/?room=${roomId}${nonceParam}`;
-        buildQR(joinURL);
-        // Mark selected
-        disp.querySelectorAll('[data-url]').forEach(r => r.textContent = '  ' + r.dataset.url);
-        row.textContent = '✓ ' + chosenURL;
-        copyToClipboard(joinURL, 'Link copied!');
-      });
-      box.style.display = 'block';
-    }
-  })
-  .catch((err) => {
-    console.error('api/info fetch failed:', err);
-    try { window.AndroidBridge?.logDiagnostic?.('api/info failed: ' + err); } catch (_) {}
-    const disp = document.getElementById('serverUrlDisplay');
-    if (disp) {
-      disp.textContent = '⚠ Could not detect LAN IP — use session code only';
-      disp.style.color = 'var(--accent-r)';
-      document.getElementById('serverUrlBox').style.display = 'block';
-    }
-  })
-  .finally(() => connectWS());
+  if (fragIP) {
+    // Kotlin passed the IP directly — no fetch needed, avoids Samsung SSL bug
+    const sslPort = 3443;
+    window._lanIP   = fragIP;
+    window._sslPort = sslPort;
+    showIP(fragIP, sslPort);
+    connectWS();
+  } else {
+    // Browser / non-Samsung fallback: use fetch
+    fetch('/api/info')
+      .then(r => r.json())
+      .then(d => {
+        const sslPort = d.sslPort || 3443;
+        const ips = d.lanIP
+          ? [d.lanIP, ...(d.allIPs || []).map(i => i.address).filter(a => a !== d.lanIP)]
+          : (d.allIPs || []).map(i => i.address);
+        if (ips.length > 0) {
+          window._lanIP   = ips[0];
+          window._sslPort = sslPort;
+          showIP(ips[0], sslPort);
+        }
+      })
+      .catch((err) => {
+        console.error('api/info fetch failed:', err);
+        try { window.AndroidBridge?.logDiagnostic?.('api/info failed: ' + err); } catch (_) {}
+      })
+      .finally(() => connectWS());
+  }
+})();

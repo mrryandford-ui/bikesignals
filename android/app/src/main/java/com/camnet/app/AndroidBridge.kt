@@ -174,23 +174,17 @@ class AndroidBridge(
                     // Confirm the SSL port is actually accepting before loading.
                     try {
                         java.net.Socket("127.0.0.1", CamNetServer.SSL_PORT).use {}
+                        // Pass LAN IP in URL fragment so viewer.js can use it directly,
+                        // bypassing fetch('/api/info') which fails on Samsung WebView
+                        // even when the cert is in NSC (known Samsung fetch() SSL bug).
                         val sslPort = CamNetServer.SSL_PORT
-                        // Load content from assets — no SSL handshake for the main frame.
-                        // Base URL is https://localhost:$sslPort/ so fetch() and WebSocket
-                        // resolve to HTTPS and are covered by NSC cert trust for localhost.
-                        val html = try {
-                            activity.assets.open("public/viewer.html")
-                                .bufferedReader().use { it.readText() }
-                        } catch (e: Exception) {
-                            android.util.Log.e("CamNet", "Failed to read viewer.html: $e")
-                            activity.runOnUiThread { activity.showHome() }
-                            return@thread
-                        }
+                        val lanIP   = CamNetServer.getLanIP() ?: ""
+                        val url     = if (lanIP.isNotEmpty())
+                            "https://localhost:$sslPort/viewer.html#lan=$lanIP"
+                        else
+                            "https://localhost:$sslPort/viewer.html"
                         activity.runOnUiThread {
-                            activity.webView.loadDataWithBaseURL(
-                                "https://localhost:$sslPort/",
-                                html, "text/html", "UTF-8", null
-                            )
+                            activity.webView.loadUrl(url)
                         }
                         return@thread
                     } catch (_: Exception) {

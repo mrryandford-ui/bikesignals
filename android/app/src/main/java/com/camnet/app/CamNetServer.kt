@@ -377,5 +377,18 @@ class CamNetServer(port: Int, private val assets: AssetManager, private val cont
 
     companion object {
         const val SSL_PORT = 3443
+
+        /** Returns the best LAN IP without needing a CamNetServer instance. */
+        fun getLanIP(): String? = try {
+            val all = java.net.NetworkInterface.getNetworkInterfaces()
+                ?.toList().orEmpty()
+                .filter { !it.isLoopback && it.isUp }
+                .flatMap { it.inetAddresses.toList() }
+                .filterIsInstance<java.net.Inet4Address>()
+                .mapNotNull { it.hostAddress }
+            all.firstOrNull {
+                it.startsWith("192.168.") || it.startsWith("10.") || it.startsWith("172.")
+            } ?: all.firstOrNull()
+        } catch (_: Exception) { null }
     }
 }

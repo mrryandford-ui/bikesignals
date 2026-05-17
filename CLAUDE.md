@@ -111,6 +111,11 @@ CamNet is a peer-to-peer multi-phone LAN security camera app. One phone acts as 
 - ✅ **No way to reset persisted settings (viewer.js + viewer.html):**
   - "Reset to defaults" button at bottom of settings panel. Confirms, then clears all `camnet.viewer.*` localStorage keys and reloads.
 
+### Fixed (v1.84 — bypass Samsung fetch() SSL bug for LAN IP detection)
+- ✅ **Root cause: Samsung WebView fetch() has a separate SSL validation path that ignores NSC cert anchors (known Samsung bug).** fetch('/api/info') silently fails → no LAN IP → no QR → session code blank (WS only called after fetch chain, so also fails).
+- ✅ **Fix: Kotlin passes LAN IP in URL fragment (AndroidBridge.kt + CamNetServer.kt):** After SSL port probe, `CamNetServer.getLanIP()` (new companion object function) gets the best RFC1918 IP. `loadUrl("https://localhost:3443/viewer.html#lan=192.168.x.x")` passes it without any fetch.
+- ✅ **viewer.js boot rewritten:** Reads `#lan=IP` from fragment first. If present, sets `window._lanIP`, shows IP in session panel, calls `connectWS()` immediately — no fetch. If no fragment (browser / non-Samsung), falls back to `fetch('/api/info')` as before.
+
 ### Fixed (v1.81 — Four UX and connection fixes from v1.79 testing)
 - ✅ **Session code blank on monitor (AndroidBridge.kt `startMonitor()`):** Replaced `loadUrl("https://localhost:$sslPort/viewer.html")` with `loadDataWithBaseURL("https://localhost:$sslPort/", html, ...)` where html is read from assets. No SSL handshake required for main frame; fetch and WebSocket still resolve to `https://localhost:3443/` (covered by NSC cert trust).
 - ✅ **FIX 2 confirmed: `showCameraSetup()` → `showSetup()` already correct.** No change needed.
@@ -488,4 +493,4 @@ camnet/
 
 ---
 
-**Last Updated:** May 2026 (v1.83 — version corrected to match build number)
+**Last Updated:** May 2026 (v1.84 — bypass Samsung fetch() SSL bug via URL fragment LAN IP)
