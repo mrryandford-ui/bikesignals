@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
+    <!-- Localhost: cleartext + self-signed cert trusted -->
     <domain-config cleartextTrafficPermitted="true">
         <domain includeSubdomains="false">localhost</domain>
         <trust-anchors>
@@ -8,10 +9,16 @@
             <certificates src="@raw/camnet_ssl_cert" />
         </trust-anchors>
     </domain-config>
+
+    <!-- LAN IPs: self-signed cert trusted, no cleartext needed -->
+    <!-- Android domain-config doesn't support IP ranges directly,
+         so we use the base-config with the cert trusted globally.
+         onReceivedSslError handles any remaining cert errors. -->
     <base-config cleartextTrafficPermitted="false">
         <trust-anchors>
             <certificates src="system" />
             <certificates src="user" />
+            <certificates src="@raw/camnet_ssl_cert" />
         </trust-anchors>
     </base-config>
 </network-security-config>
