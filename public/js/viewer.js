@@ -25,6 +25,9 @@ let muteAll = false;
 let mirrorFront = true;
 let currentLayout = 'l-auto';
 let photoQuality = '720'; // '480' | '720' | '1080' | 'source'
+let alertSound    = true;
+let alertVibration = true;
+let alertCooldown  = 30; // seconds — must be declared before lsLoad rehydration at boot
 
 // ── Rough JPEG + video size tables for picker estimates ────────
 // Values are byte/bit averages — JPEG size varies a lot with scene content.
@@ -192,8 +195,16 @@ async function runSmartDetection(video) {
 
 // ── WebSocket ──────────────────────────────────────────────────
 function connectWS() {
-  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const wsUrl = `${proto}//${location.host}`;
+  // In the Android app Kotlin passes wsport=PORT in the URL fragment.
+  // Use ws://localhost:PORT (plain) so the WebSocket never needs SSL.
+  // Chrome/WebView allows ws://localhost from https:// pages via the
+  // localhost mixed-content exemption — no cert trust issues.
+  const fragParams = new URLSearchParams(location.hash.slice(1));
+  const wsPort = fragParams.get('wsport');
+  const wsUrl  = (wsPort && window.AndroidBridge)
+    ? `ws://localhost:${wsPort}`
+    : (location.protocol === 'https:' ? 'wss:' : 'ws:') + `//${location.host}`;
+
   console.log('[CamNet] WS connecting to:', wsUrl);
   try { window.AndroidBridge?.logDiagnostic?.('WS connecting: ' + wsUrl); } catch (_) {}
 
@@ -1016,9 +1027,6 @@ let motionNotifEnabled  = false;
 let motionAutoSnap       = false;
 let motionFlash          = false;
 let motionFlashStillMins = 2;
-let alertSound           = true;
-let alertVibration       = true;
-let alertCooldown        = 30; // seconds
 
 function startMotion(cameraId) {
   const peer = peers.get(cameraId);

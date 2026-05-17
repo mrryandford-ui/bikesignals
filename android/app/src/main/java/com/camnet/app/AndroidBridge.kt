@@ -178,13 +178,19 @@ class AndroidBridge(
                         // bypassing fetch('/api/info') which fails on Samsung WebView
                         // even when the cert is in NSC (known Samsung fetch() SSL bug).
                         val sslPort = CamNetServer.SSL_PORT
+                        val wsPort  = SignalingService.PORT   // plain HTTP/WS port
                         val lanIP   = CamNetServer.getLanIP() ?: ""
-                        val url     = if (lanIP.isNotEmpty())
-                            "https://localhost:$sslPort/viewer.html#lan=$lanIP"
-                        else
-                            "https://localhost:$sslPort/viewer.html"
+                        // Pass both LAN IP and plain WS port in the fragment.
+                        // viewer.js uses ws://localhost:wsPort (plain) so the WebSocket
+                        // never needs SSL — avoids Samsung WebView's JS cert validation bug.
+                        val frag = buildString {
+                            if (lanIP.isNotEmpty()) append("lan=$lanIP&")
+                            append("wsport=$wsPort")
+                        }
                         activity.runOnUiThread {
-                            activity.webView.loadUrl(url)
+                            activity.webView.loadUrl(
+                                "https://localhost:$sslPort/viewer.html#$frag"
+                            )
                         }
                         return@thread
                     } catch (_: Exception) {

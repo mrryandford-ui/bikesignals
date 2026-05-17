@@ -111,6 +111,10 @@ CamNet is a peer-to-peer multi-phone LAN security camera app. One phone acts as 
 - ✅ **No way to reset persisted settings (viewer.js + viewer.html):**
   - "Reset to defaults" button at bottom of settings panel. Confirms, then clears all `camnet.viewer.*` localStorage keys and reloads.
 
+### Fixed (v1.86 — JS TDZ crash + WebSocket plain-port bypass)
+- ✅ **`alertSound` used before initialization — JS crashes on load (viewer.js):** `let alertSound/alertVibration/alertCooldown` were declared at line ~1019 but assigned via `lsLoad()` at line 129 (temporal dead zone). Moved all three declarations to the top of the file alongside the other settings variables, before any code runs.
+- ✅ **WebSocket SSL cert invalid on Samsung — `wss://localhost:3443` fails (AndroidBridge.kt + viewer.js):** p12 cert is unchanged (confirmed identical). Root cause: Samsung WebView's JS network stack doesn't trust NSC cert anchors for JS-initiated WebSocket connections. Fix: Kotlin passes `wsport=PORT` in the URL fragment alongside `lan=IP`. viewer.js uses `ws://localhost:PORT` (plain, no SSL) when `wsport` is present and `AndroidBridge` is defined. Chrome/WebView allows `ws://localhost` from `https://` pages via the localhost mixed-content exemption — no cert needed.
+
 ### Fixed (v1.85 — auto-sync SSL cert + WS diagnostics)
 - ✅ **Stale pinned cert causing WSS failure (build.gradle):** Added `extractSslCert` Gradle task that reads `camnet-ssl.p12`, extracts the current cert, and writes `res/raw/camnet_ssl_cert.pem` at build time. Runs before all compile/process tasks via `configureEach`. Cert in NSC trust anchor now always matches what the server actually presents.
 - ✅ **WebSocket diagnostic logging (viewer.js `connectWS()`):** Logs URL, open, close (code+reason), and error events to `logDiagnostic` (→ `crash_report.txt`) and console. On WS error, shows `WS-ERR` in the session code box so failures are visible without USB debugging.
@@ -497,4 +501,4 @@ camnet/
 
 ---
 
-**Last Updated:** May 2026 (v1.85 — auto-sync SSL cert at build time, WS diagnostics)
+**Last Updated:** May 2026 (v1.86 — JS TDZ crash fix, WebSocket plain-port bypass)
