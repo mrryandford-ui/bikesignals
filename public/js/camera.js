@@ -57,6 +57,19 @@ const MAX_CONNECT_ATTEMPTS = 10; // 10 × 3s = 30s before giving up
 let connectAttempts = 0;
 let giveUpTimer    = null;
 
+// ── Pre-fill password from Android setup screen (via AndroidBridge) ──
+// When the user enters a password on the Kotlin setup screen, it's stored
+// in SharedPreferences and retrieved here so camera.js can hash and use it.
+if (window.AndroidBridge?.getPendingPassword) {
+  try {
+    const pending = window.AndroidBridge.getPendingPassword();
+    if (pending) {
+      const pwField = document.getElementById('passwordInput');
+      if (pwField) pwField.value = pending;
+    }
+  } catch (_) {}
+}
+
 // ── Pre-fill room code and nonce from URL params ───────────────
 const params = new URLSearchParams(location.search);
 let urlNonce = params.get('nonce') || '';

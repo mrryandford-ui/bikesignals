@@ -361,6 +361,10 @@ class MainActivity : AppCompatActivity() {
                  autocomplete="off" autocorrect="off" spellcheck="false">
           <span class="suffix">:3443</span>
         </div>
+        <input id="pw" type="password" placeholder="Password (if required — ask monitor user)"
+          style="width:100%;padding:14px;font-size:15px;background:#1e293b;
+          border:1.5px solid #334155;border-radius:14px;color:#f1f5f9;
+          outline:none;box-sizing:border-box">
         <button onclick="connect()">Connect &rarr;</button>
         <button class="back" id="backBtn">← Back</button>
         <p class="hint">First visit: tap Advanced &rarr; Proceed (once only)</p>
@@ -383,6 +387,8 @@ class MainActivity : AppCompatActivity() {
           function connect(){
             var ip = document.getElementById('ip').value.trim().replace(/[\/\s]/g,'');
             if(!ip) return;
+            var pw = document.getElementById('pw').value.trim();
+            if(pw) AndroidBridge.setPendingPassword(pw);
             document.querySelector('button[onclick="connect()"]').textContent = 'Connecting…';
             AndroidBridge.setServerUrl('https://'+ip+':3443');
           }

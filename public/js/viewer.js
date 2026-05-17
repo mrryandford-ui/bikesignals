@@ -2054,12 +2054,24 @@ function stopPing() {
   pingIntervalId = null;
 }
 
-// Session password
+// Session password — store plaintext so it can be copied/shared
+let _sessionPasswordPlain = '';
+
 document.getElementById('setPasswordBtn').addEventListener('click', async () => {
   const pw = document.getElementById('sessionPasswordInput').value;
+  _sessionPasswordPlain = pw;
   await setSessionPassword(pw);
-  showToast(pw ? '🔒 Session password set' : '🔓 Session password cleared');
   document.getElementById('sessionPasswordInput').value = '';
+  if (pw) {
+    showToast('🔒 Password set — share it with camera users manually');
+  } else {
+    showToast('🔓 Session password cleared');
+  }
+});
+
+document.getElementById('copyPasswordBtn').addEventListener('click', () => {
+  if (!_sessionPasswordPlain) { showToast('No password set'); return; }
+  copyToClipboard(_sessionPasswordPlain, 'Password copied!');
 });
 
 // Alert sound / vibration / cooldown

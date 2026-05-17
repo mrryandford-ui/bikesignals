@@ -59,6 +59,25 @@ class AndroidBridge(
         }
     }
 
+    /**
+     * Temporarily stores a plaintext password from the Kotlin setup screen so camera.js
+     * can read it (and hash it) after camera.html loads. Cleared on first read.
+     */
+    @JavascriptInterface
+    fun setPendingPassword(password: String) {
+        context.getSharedPreferences("camnet", Context.MODE_PRIVATE)
+            .edit().putString("pending_password", password).apply()
+    }
+
+    /** Returns the pending password and immediately clears it. */
+    @JavascriptInterface
+    fun getPendingPassword(): String {
+        val prefs = context.getSharedPreferences("camnet", Context.MODE_PRIVATE)
+        val pw = prefs.getString("pending_password", "") ?: ""
+        prefs.edit().remove("pending_password").apply()
+        return pw
+    }
+
     /** Called from setup screen to save server URL and load camera.html. */
     @JavascriptInterface
     fun setServerUrl(url: String) {
@@ -156,15 +175,28 @@ class AndroidBridge(
                     try {
                         java.net.Socket("127.0.0.1", CamNetServer.SSL_PORT).use {}
                         val sslPort = CamNetServer.SSL_PORT
+                        // Load content from assets — no SSL handshake for the main frame.
+                        // Base URL is https://localhost:$sslPort/ so fetch() and WebSocket
+                        // resolve to HTTPS and are covered by NSC cert trust for localhost.
+                        val html = try {
+                            activity.assets.open("public/viewer.html")
+                                .bufferedReader().use { it.readText() }
+                        } catch (e: Exception) {
+                            android.util.Log.e("CamNet", "Failed to read viewer.html: $e")
+                            activity.runOnUiThread { activity.showHome() }
+                            return@thread
+                        }
                         activity.runOnUiThread {
-                            activity.webView.loadUrl("https://localhost:$sslPort/viewer.html")
+                            activity.webView.loadDataWithBaseURL(
+                                "https://localhost:$sslPort/",
+                                html, "text/html", "UTF-8", null
+                            )
                         }
                         return@thread
                     } catch (_: Exception) {
                         // SSL port not ready yet — fall through and sleep
                     }
                 }
-                Thread.sleep(100) // short sleep before recheck
                 Thread.sleep(500)
             }
             // Server never came up — show a useful error

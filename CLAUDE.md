@@ -111,6 +111,16 @@ CamNet is a peer-to-peer multi-phone LAN security camera app. One phone acts as 
 - ✅ **No way to reset persisted settings (viewer.js + viewer.html):**
   - "Reset to defaults" button at bottom of settings panel. Confirms, then clears all `camnet.viewer.*` localStorage keys and reloads.
 
+### Fixed (v1.81 — Four UX and connection fixes from v1.79 testing)
+- ✅ **Session code blank on monitor (AndroidBridge.kt `startMonitor()`):** Replaced `loadUrl("https://localhost:$sslPort/viewer.html")` with `loadDataWithBaseURL("https://localhost:$sslPort/", html, ...)` where html is read from assets. No SSL handshake required for main frame; fetch and WebSocket still resolve to `https://localhost:3443/` (covered by NSC cert trust).
+- ✅ **FIX 2 confirmed: `showCameraSetup()` → `showSetup()` already correct.** No change needed.
+- ✅ **Password UX (viewer.html + viewer.js + camera.html + setupHtml + AndroidBridge.kt):**
+  - Plaintext stored in `_sessionPasswordPlain` in viewer.js; toast says "share it with camera users manually"; 📋 copy button added next to Set button in settings panel.
+  - camera.html password placeholder: "Leave blank if none" → "Ask the monitor user".
+  - setupHtml (Kotlin): password input added; `connect()` calls `AndroidBridge.setPendingPassword(pw)` before `setServerUrl`.
+  - `AndroidBridge.setPendingPassword/getPendingPassword`: stores/clears plaintext in SharedPreferences so camera.js can pre-fill `#passwordInput` after camera.html loads (camera.js hashes it on join).
+- ✅ **Code input placeholder (camera.html):** `XXXXXXXX` → `8-CHAR CODE`. `autocapitalize="characters"` and `maxlength="8"` already present.
+
 ### Fixed (v1.80 — Auto-update via GitHub Releases)
 - ✅ **GitHub Actions workflow creates Releases (build-apk.yml):** Each successful build now publishes a tagged GitHub Release (`v{run_number}`) with the APK attached. `GITHUB_TOKEN` used automatically — no extra secrets needed.
 - ✅ **Version check on launch (MainActivity.kt `checkForUpdate()`):** Background thread hits `api.github.com/repos/.../releases/latest`, compares `tag_name` (strip `v`, parse int) against `BuildConfig.VERSION_CODE`. Silent on network failure (5s timeout). Shows `AlertDialog` if newer version found.
@@ -478,4 +488,4 @@ camnet/
 
 ---
 
-**Last Updated:** May 2026 (v1.80 — auto-update via GitHub Releases)
+**Last Updated:** May 2026 (v1.81 — session code fix, password UX, placeholder fix)
