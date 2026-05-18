@@ -283,7 +283,7 @@ function onRoomCreated(id, nonce) {
   const sslPort = window._sslPort || 3443;
   const base    = ip ? `https://${ip}:${sslPort}` : location.origin;
   const nonceParam = roomNonce ? `&nonce=${roomNonce}` : '';
-  joinURL = `${base}/?room=${id}${nonceParam}`;
+  joinURL = `${base}/camera.html?room=${id}${nonceParam}`;
 
   document.getElementById('roomCode').textContent = id;
   document.getElementById('panelRoomCode').textContent = id;
@@ -2171,7 +2171,7 @@ function escHtml(s) {
       const chosenURL = row.dataset.url;
       window._lanIP = new URL(chosenURL).hostname;
       const nonceParam = roomNonce ? `&nonce=${roomNonce}` : '';
-      joinURL = `${chosenURL}/?room=${roomId}${nonceParam}`;
+      joinURL = `${chosenURL}/camera.html?room=${roomId}${nonceParam}`;
       buildQR(joinURL);
       disp.querySelectorAll('[data-url]').forEach(r => r.textContent = '  ' + r.dataset.url);
       row.textContent = '✓ ' + chosenURL;
