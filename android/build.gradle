@@ -1,4 +1,5 @@
 plugins {
     id 'com.android.application' version '9.0.1' apply false
-    id 'org.jetbrains.kotlin.android' version '2.2.10' apply false
+    // Kotlin is now handled by AGP 9.0 built-in Kotlin (builtInKotlin=true default).
+    // No separate KGP plugin needed.
 }
