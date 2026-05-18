@@ -1,4 +1,4 @@
-const CACHE = 'camnet-v9';
+const CACHE = 'camnet-v10';
 const PRECACHE = [
   '/',
   '/viewer.html',
@@ -40,7 +40,14 @@ self.addEventListener('fetch', (e) => {
   // Skip API calls and WebSocket upgrades — always hit the network
   if (url.pathname.startsWith('/api/') || url.protocol === 'ws:' || url.protocol === 'wss:') return;
 
-  // Network-first: always try the server, only fall back to cache if offline
+  // Never intercept URLs with query params (join links carry room code + nonce —
+  // must always reach the network fresh, never served from or stored in cache).
+  if (url.search) {
+    e.respondWith(fetch(e.request));
+    return;
+  }
+
+  // Network-first for everything else: try the server, fall back to cache if offline
   e.respondWith(
     fetch(e.request)
       .then(res => {
