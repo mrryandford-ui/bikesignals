@@ -89,7 +89,9 @@ CamNet is a peer-to-peer multi-phone LAN security camera app. One phone acts as 
 ### Fixed (v1.93 — Kotlin 2.1.21 + Gradle 8.14.1 + AGP 8.9.0 + Ktor 3.1.3 migration + responsive UI)
 - ✅ **Kotlin 1.9.22 → 2.1.21 (K2 compiler) (android/build.gradle):** K2 is backward-compatible; required to read Kotlin 2.x metadata from newer AndroidX libs (activity-ktx 1.10.1, core-ktx 1.16.0 are compiled with Kotlin 2.x — using them with Kotlin 1.9 causes "incompatible metadata" compile errors).
 - ✅ **Gradle 8.2.1 → 8.14.1 (build-apk.yml):** AGP 8.2.2 tops out at Gradle 8.6; 8.14.1 needed for K2 Gradle plugin improvements.
-- ✅ **AGP 8.2.2 → 8.9.0 (android/build.gradle):** AGP 8.2.2 uses internal Gradle APIs removed in 8.7+. AGP 8.9.0 minimum Gradle is 8.11.1 — fully compatible with 8.14.1. CI sdkmanager step updated to also install `platforms;android-35` and `build-tools;35.0.0`.
+- ✅ **AGP 8.2.2 → 8.11.0 (android/build.gradle):** AGP 8.2.2 uses internal Gradle APIs removed in 8.7+. AGP 8.9.0 predates Gradle 8.13 and also fails. AGP 8.11.0 minimum Gradle is 8.13 — the first AGP built and tested against the 8.13–8.14 range. CI sdkmanager step updated to also install `platforms;android-35` and `build-tools;35.0.0`.
+- ✅ **compileSdk/targetSdk 34 → 35 (app/build.gradle):** Required by AGP 8.11+; Android 15 is the current baseline. Edge-to-edge enforcement on targetSdk 35 is handled by `hideSystemBars()` (already hides all bars) and the v1.93 safe-area-inset CSS.
+- ✅ **Removed `inputs.file()` from `extractSslCert` Gradle task (app/build.gradle):** Gradle 8.14 enforces stricter task input declaration validation; file existence is already checked defensively inside `doLast`.
 - ✅ **Ktor 2.3.7 → 3.1.3 (app/build.gradle + CamNetServer.kt):** Fixes CVE-2025-29904 HTTP request smuggling. Breaking API: `java.time.Duration` → `kotlin.time.Duration.Companion.seconds` for `pingPeriod`/`timeout` in `install(WebSockets)`. All other CamNetServer.kt API (embeddedServer, routing, webSocket, DefaultWebSocketSession) is stable across 2.x→3.x.
 - ✅ **AndroidX bumps (app/build.gradle):** appcompat 1.6.1→1.7.1, core-ktx 1.12.0→1.16.0, activity-ktx 1.8.2→1.10.1.
 

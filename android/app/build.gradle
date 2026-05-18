@@ -5,12 +5,12 @@ plugins {
 
 android {
     namespace 'com.camnet.app'
-    compileSdk 34
+    compileSdk 35
 
     defaultConfig {
         applicationId "com.camnet.app"
         minSdk 29
-        targetSdk 34
+        targetSdk 35
         // versionCode and versionName are driven by BUILD_NUMBER env var set in CI.
         // Local builds default to 1. BUILD_NUMBER is exported via $GITHUB_ENV in the workflow.
         def runNum = (System.getenv("BUILD_NUMBER") ?: "1").toInteger()
@@ -76,8 +76,6 @@ task copyWebAssets(type: Copy) {
 def extractSslCert = tasks.register('extractSslCert') {
     def p12File = file("src/main/assets/camnet-ssl.p12")
     def pemFile = file("src/main/res/raw/camnet_ssl_cert.pem")
-    inputs.file(p12File)
-    outputs.file(pemFile)
     doLast {
         if (!p12File.exists()) {
             println "camnet-ssl.p12 not found — skipping cert extraction"
