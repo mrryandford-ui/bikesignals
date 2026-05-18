@@ -86,14 +86,15 @@ CamNet is a peer-to-peer multi-phone LAN security camera app. One phone acts as 
 
 ## Known Issues & Fixes
 
-### Fixed (v1.94 — AGP 9.0.1 + Gradle 9.1.0 + Kotlin 2.2.10 migration)
-- ✅ **AGP 8.11.0 → 9.0.1 (android/build.gradle):** Major version upgrade. AGP 9.0 requires Gradle 9.1.0 minimum, build-tools 36.0.0, and KGP 2.2.10.
-- ✅ **Gradle 8.14.1 → 9.1.0 (build-apk.yml):** Minimum required for AGP 9.0.1. CI install step updated.
-- ✅ **Kotlin 2.1.21 → 2.2.10 (android/build.gradle):** Minimum KGP for AGP 9.0.1.
+### Fixed (v1.94 — AGP 9.0.1 + Gradle 9.1.0 migration)
+- ✅ **AGP 8.11.0 → 9.0.1 (android/build.gradle):** Major version upgrade. AGP 9.0 requires Gradle 9.1.0 minimum and build-tools 36.0.0. AGP 8.9.0 and 8.11.0 were tried first but both fail with Gradle 8.14.1 due to internal Gradle API removals in 8.7+ and 8.13+ respectively; the correct fix was upgrading both AGP and Gradle together.
+- ✅ **Gradle 8.14.1 → 9.1.0 (build-apk.yml):** Minimum required for AGP 9.0.1.
 - ✅ **build-tools 36.0.0 added to CI (build-apk.yml):** AGP 9.0 requires build-tools 36.0.0 for D8/R8/aapt2.
-- ✅ **`android.builtInKotlin=false` (android/gradle.properties):** AGP 9.0 defaults `builtInKotlin=true`, which conflicts with explicitly applied `org.jetbrains.kotlin.android` plugin. Opt-out preserves the existing KGP-driven compilation pipeline.
-- ✅ **`task copyWebAssets(type: Copy)` → `tasks.register('copyWebAssets', Copy)` (app/build.gradle):** Gradle 9.x removed the eager `task name(type: X)` creation syntax. Lazy registration via `tasks.register` is the required approach.
-- ✅ **Removed `org.gradle.configuration-cache=true` (android/gradle.properties):** Gradle 9.x enforces configuration cache strictly. The `afterEvaluate` block in `app/build.gradle` is configuration-cache-incompatible; removing the opt-in prevents build failures.
+- ✅ **AGP 9.0 builtInKotlin — dropped explicit KGP plugin (android/build.gradle + app/build.gradle):** AGP 9.0 defaults `builtInKotlin=true` and manages Kotlin compilation internally. Applying `org.jetbrains.kotlin.android` alongside it causes a build conflict. Fix: removed both `id 'org.jetbrains.kotlin.android'` declarations and removed `kotlinOptions { jvmTarget = '17' }` — AGP 9.0 infers jvmTarget from `compileOptions.targetCompatibility = VERSION_17` automatically. No separate KGP version pin is needed; AGP 9.0 bundles Kotlin 2.2.10.
+- ✅ **`task copyWebAssets(type: Copy)` → `tasks.register('copyWebAssets', Copy)` (app/build.gradle):** Gradle 9.x removed the eager `task name(type: X)` creation syntax. Lazy registration via `tasks.register` is required.
+- ✅ **`afterEvaluate { preBuild.dependsOn ... }` → `tasks.named('preBuild').configure { ... }` (app/build.gradle):** AGP 9.0 creates `preBuild` as a lazy task; direct property access inside `afterEvaluate` fails. `tasks.named()` defers the lookup until the task is actually registered.
+- ✅ **Removed `android.enableJetifier=true` (gradle.properties):** Jetifier is unsupported in AGP 9.0; all dependencies are already AndroidX so no translation is needed.
+- ✅ **Removed `org.gradle.configuration-cache=true` (gradle.properties):** Gradle 9.x enforces configuration cache strictly. The `afterEvaluate` block is configuration-cache-incompatible; removing the opt-in avoids the conflict.
 
 ### Fixed (v1.93 — Kotlin 2.1.21 + Gradle 8.14.1 + AGP 8.11.0 + Ktor 3.1.3 migration + compileSdk 35 + responsive UI)
 - ✅ **Kotlin 1.9.22 → 2.1.21 (K2 compiler) (android/build.gradle):** K2 is backward-compatible; required to read Kotlin 2.x metadata from newer AndroidX libs (activity-ktx 1.10.1, core-ktx 1.16.0 are compiled with Kotlin 2.x — using them with Kotlin 1.9 causes "incompatible metadata" compile errors).
@@ -439,9 +440,9 @@ CamNet is a peer-to-peer multi-phone LAN security camera app. One phone acts as 
 
 | Layer | Tech |
 |-------|------|
-| Server | Kotlin 2.2.10, Ktor 3.1.3 (CIO engine) |
-| Android | Kotlin 2.2.10, AGP 9.0.1, compileSdk/targetSdk 35, minSdk 29 |
-| Build | Gradle 9.1.0, Java 17 (Temurin) |
+| Server | Kotlin 2.2.10 (bundled via AGP builtInKotlin), Ktor 3.1.3 (CIO engine) |
+| Android | AGP 9.0.1 + built-in Kotlin 2.2.10, compileSdk/targetSdk 35, minSdk 29 |
+| Build | Gradle 9.1.0, Java 17 (Temurin), build-tools 36.0.0 |
 | Web (Monitor/Camera) | HTML5, Vanilla JS, WebRTC, MediaRecorder |
 | Styling | CSS Grid, flexbox, safe-area-inset, 100dvh |
 | AI | TensorFlow.js 4.22.0 + COCO-SSD 2.2.3 (lite_mobilenet_v2) |
@@ -488,7 +489,7 @@ CamNet is a peer-to-peer multi-phone LAN security camera app. One phone acts as 
 
 ### CI / GitHub Actions (`build-apk.yml`)
 Every push to `main` or `claude/*` branches triggers a build:
-1. Java 17 (Temurin) + Android SDK 34/35 + build-tools 35/36 + Gradle 9.1.0 installed
+1. Java 17 (Temurin) + Android SDK 34/35 + build-tools 35.0.0/36.0.0 + Gradle 9.1.0 installed
 2. Signing keystore (`camnet-debug.jks`) restored from Actions cache (generated once, reused so APK updates install without uninstalling)
 3. `BUILD_NUMBER` env var set to `github.run_number`; `build.gradle` reads it via `System.getenv("BUILD_NUMBER")` — no `sed` manipulation needed
 4. `gradle assembleDebug --no-daemon` builds the APK
@@ -629,4 +630,4 @@ camnet/
 
 ---
 
-**Last Updated:** May 2026 (v1.94 — AGP 9.0.1 / Gradle 9.1.0 / Kotlin 2.2.10 migration; builtInKotlin=false, build-tools 36.0.0, Gradle 9.x eager-task fix)
+**Last Updated:** May 2026 (v1.94 — AGP 9.0.1 + Gradle 9.1.0 migration complete; builtInKotlin, Jetifier, config-cache, lazy preBuild, eager-task fixes)
