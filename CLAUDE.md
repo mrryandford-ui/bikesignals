@@ -86,6 +86,9 @@ CamNet is a peer-to-peer multi-phone LAN security camera app. One phone acts as 
 
 ## Known Issues & Fixes
 
+### Fixed (v1.95 — Gradle 9.1.0 → 9.5.1 patch bump)
+- ✅ **Gradle 9.1.0 → 9.5.1 (build-apk.yml):** Current stable Gradle 9.x. AGP 9.0.1 supported through Gradle 9.5.x per Gradle compatibility matrix (tested through AGP 9.2.0-alpha05). 9.5.1 adds task provenance to error messages — failure messages now include "registered by plugin X" so failed task sources are traceable. Also includes automatic Wrapper download retry and numerous R8 and config-cache fixes vs 9.1.0. CI-only change; no Gradle build script changes required.
+
 ### Fixed (v1.94 — AGP 9.0.1 + Gradle 9.1.0 migration)
 - ✅ **AGP 8.11.0 → 9.0.1 (android/build.gradle):** Major version upgrade. AGP 9.0 requires Gradle 9.1.0 minimum and build-tools 36.0.0. AGP 8.9.0 and 8.11.0 were tried first but both fail with Gradle 8.14.1 due to internal Gradle API removals in 8.7+ and 8.13+ respectively; the correct fix was upgrading both AGP and Gradle together.
 - ✅ **Gradle 8.14.1 → 9.1.0 (build-apk.yml):** Minimum required for AGP 9.0.1.
@@ -442,7 +445,7 @@ CamNet is a peer-to-peer multi-phone LAN security camera app. One phone acts as 
 |-------|------|
 | Server | Kotlin 2.2.10 (bundled via AGP builtInKotlin), Ktor 3.1.3 (CIO engine) |
 | Android | AGP 9.0.1 + built-in Kotlin 2.2.10, compileSdk/targetSdk 35, minSdk 29 |
-| Build | Gradle 9.1.0, Java 17 (Temurin), build-tools 36.0.0 |
+| Build | Gradle 9.5.1, Java 17 (Temurin), build-tools 36.0.0 |
 | Web (Monitor/Camera) | HTML5, Vanilla JS, WebRTC, MediaRecorder |
 | Styling | CSS Grid, flexbox, safe-area-inset, 100dvh |
 | AI | TensorFlow.js 4.22.0 + COCO-SSD 2.2.3 (lite_mobilenet_v2) |
@@ -630,4 +633,4 @@ camnet/
 
 ---
 
-**Last Updated:** May 2026 (v1.94 — AGP 9.0.1 + Gradle 9.1.0 migration complete; builtInKotlin, Jetifier, config-cache, lazy preBuild, eager-task fixes)
+**Last Updated:** May 2026 (v1.95 — Gradle 9.5.1 patch bump on top of v1.94 AGP 9.0.1 stack)
