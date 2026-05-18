@@ -19,6 +19,10 @@ let joinURL   = null; // full URL camera phones should open (uses LAN IP, not lo
 const peers = new Map(); // cameraId → { pc, name, stream, recorder, motion, ... }
 let cameraCounter = 0;
 
+// ── Two-way audio (monitor mic → cameras) ─────────────────────
+let monitorAudioStream  = null; // getUserMedia audio stream from monitor's mic
+let monitorMicEnabled   = false;
+
 let globalMotion = false;
 let motionSens = 'mid';
 let muteAll = false;
@@ -121,8 +125,11 @@ function lsLoad(key, fallback) {
 }
 
 // Rehydrate before any UI renders
-globalMotion          = lsLoad('globalMotion', false);
+globalMotion          = lsLoad('globalMotion', true);   // default ON — Sprint 1 intent
 motionSens            = lsLoad('motionSens', 'mid');
+motionAutoSnap        = lsLoad('motionAutoSnap', false);
+motionFlash           = lsLoad('motionFlash', false);
+motionFlashStillMins  = lsLoad('motionFlashStillMins', 2);
 muteAll               = lsLoad('muteAll', false);
 mirrorFront           = lsLoad('mirrorFront', true);
 currentLayout         = lsLoad('currentLayout', 'l-auto');
@@ -327,9 +334,11 @@ function onCameraJoined(cameraId, name) {
 
   const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
 
-  // Prepare to receive video+audio
+  // Prepare to receive video+audio from camera.
+  // Audio is sendrecv so the camera's offerToReceiveAudio slot is matched and
+  // we can later inject the monitor mic track without re-negotiating.
   pc.addTransceiver('video', { direction: 'recvonly' });
-  pc.addTransceiver('audio', { direction: 'recvonly' });
+  pc.addTransceiver('audio', { direction: 'sendrecv' });
 
   pc.ontrack = (e) => {
     const peer = peers.get(cameraId);
@@ -348,7 +357,7 @@ function onCameraJoined(cameraId, name) {
     if (pc.iceConnectionState === 'failed') pc.restartIce();
   };
 
-  peers.set(cameraId, { pc, name, stream: null, recorder: null, motion: null, facingMode: null, torchOn: false, quality: 720, stealth: false, recordTarget: null, recDurationMs: 0, recStartTime: 0, recSegNum: 0, recBaseName: '', recChunks: [], recSegTimer: null, recDurationTimer: null, zone: null, lastMotionAt: 0, motionConsecutive: 0, motionFlashActive: false, motionFlashTimer: null, timelapse: null });
+  peers.set(cameraId, { pc, name, stream: null, recorder: null, motion: null, facingMode: null, torchOn: false, quality: 720, stealth: false, recordTarget: null, recDurationMs: 0, recStartTime: 0, recSegNum: 0, recBaseName: '', recChunks: [], recSegTimer: null, recDurationTimer: null, zone: null, lastMotionAt: 0, motionConsecutive: 0, motionFlashActive: false, motionFlashTimer: null, timelapse: null, audioSendTransceiver: null, dvrSegments: [], dvrRecorder: null, dvrSegTimer: null, dvrEnabled: false });
   addCameraCard(cameraId, name);
   updateCamCount();
 }
@@ -393,6 +402,7 @@ async function handleOffer({ cameraId, sdp }) {
     const answer = await p.pc.createAnswer();
     await p.pc.setLocalDescription(answer);
     wsSend({ type: 'answer', cameraId, sdp: answer.sdp });
+    _storeAudioSendTransceiver(cameraId);
   } catch (e) {
     console.warn('handleOffer failed, retrying with fresh peer:', e);
     try {
@@ -402,10 +412,29 @@ async function handleOffer({ cameraId, sdp }) {
       const answer = await fresh.pc.createAnswer();
       await fresh.pc.setLocalDescription(answer);
       wsSend({ type: 'answer', cameraId, sdp: answer.sdp });
+      _storeAudioSendTransceiver(cameraId);
     } catch (e2) {
       console.error('handleOffer retry also failed:', e2);
       showToast('Camera reconnect failed');
     }
+  }
+}
+
+// After SDP negotiation, find the audio transceiver whose sender faces the camera
+// (direction was sendrecv from viewer side) and wire the monitor mic track if active.
+function _storeAudioSendTransceiver(cameraId) {
+  const peer = peers.get(cameraId);
+  if (!peer) return;
+  // The sendrecv audio transceiver we added in onCameraJoined.
+  const t = peer.pc.getTransceivers().find(tr =>
+    tr.sender.track?.kind === 'audio' ||
+    (tr.receiver.track?.kind !== 'video' && tr.direction === 'sendrecv')
+  ) || peer.pc.getTransceivers().find(tr => tr.direction === 'sendrecv');
+  peer.audioSendTransceiver = t || null;
+  // If monitor mic is already active, inject the track immediately.
+  if (monitorMicEnabled && monitorAudioStream && peer.audioSendTransceiver) {
+    const track = monitorAudioStream.getAudioTracks()[0];
+    if (track) peer.audioSendTransceiver.sender.replaceTrack(track).catch(() => {});
   }
 }
 
@@ -534,6 +563,7 @@ function addCameraCard(cameraId, name) {
       <button class="icon-btn" data-action="snapshot"    title="Snapshot">📸</button>
       <button class="icon-btn" data-action="record"      title="Record">⏺</button>
       <button class="icon-btn" data-action="timelapse"   title="Timelapse">⏱</button>
+      <button class="icon-btn" data-action="dvr"         title="DVR — rolling 30-min buffer">📼</button>
       <button class="icon-btn" data-action="mute"        title="Mute">🔊</button>
       <button class="icon-btn" data-action="nightvision" title="Night vision">🌙</button>
       <button class="icon-btn" data-action="motion"      title="Motion detection">🎯</button>
@@ -645,6 +675,17 @@ async function handleCardAction(cameraId, action, btn) {
         if (!opts) break;
         await startRecording(cameraId, opts.target, opts.durationMs);
         btn.textContent = '⏹'; btn.classList.add('active');
+      }
+      break;
+
+    case 'dvr':
+      if (peer.dvrEnabled) {
+        openDvrPlayback(cameraId);
+      } else {
+        startDvr(cameraId);
+        btn.classList.add('active');
+        btn.title = 'DVR active — tap to review footage';
+        showToast('📼 DVR on — rolling 30-min buffer active');
       }
       break;
 
@@ -1026,11 +1067,162 @@ function showRecIndicator(cameraId, show) {
   }
 }
 
+// ── DVR — rolling 30-minute buffer ─────────────────────────────
+const DVR_SEGMENT_MS   = 60_000;       // 1-minute segments
+const DVR_MAX_SEGMENTS = 30;           // keep last 30 min
+
+function startDvr(cameraId) {
+  const peer = peers.get(cameraId);
+  if (!peer || peer.dvrEnabled) return;
+  peer.dvrEnabled  = true;
+  peer.dvrSegments = [];
+  _startDvrSegment(cameraId);
+}
+
+function stopDvr(cameraId) {
+  const peer = peers.get(cameraId);
+  if (!peer || !peer.dvrEnabled) return;
+  peer.dvrEnabled = false;
+  clearTimeout(peer.dvrSegTimer); peer.dvrSegTimer = null;
+  if (peer.dvrRecorder && peer.dvrRecorder.state !== 'inactive') peer.dvrRecorder.stop();
+  peer.dvrRecorder = null;
+  const btn = document.querySelector(`#card-${cameraId} [data-action="dvr"]`);
+  if (btn) { btn.classList.remove('active'); btn.title = 'DVR — rolling 30-min buffer'; }
+}
+
+function _startDvrSegment(cameraId) {
+  const peer = peers.get(cameraId);
+  if (!peer || !peer.dvrEnabled || !peer.stream) {
+    // Stream not ready yet — retry shortly
+    if (peer?.dvrEnabled) peer.dvrSegTimer = setTimeout(() => _startDvrSegment(cameraId), 1000);
+    return;
+  }
+  const mimeType = ['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm']
+    .find(m => MediaRecorder.isTypeSupported(m)) || '';
+  const chunks = [];
+  const startTs = Date.now();
+  try {
+    const rec = new MediaRecorder(peer.stream, mimeType ? { mimeType } : {});
+    peer.dvrRecorder = rec;
+    rec.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+    rec.onstop = () => {
+      peer.dvrRecorder = null;
+      if (chunks.length > 0) {
+        const blob = new Blob(chunks, { type: rec.mimeType || 'video/webm' });
+        peer.dvrSegments.push({ blob, startTs, endTs: Date.now() });
+        // Rolling window — purge oldest segments beyond 30 min
+        while (peer.dvrSegments.length > DVR_MAX_SEGMENTS) peer.dvrSegments.shift();
+      }
+      if (peer.dvrEnabled) _startDvrSegment(cameraId);
+    };
+    rec.start(1000);
+    peer.dvrSegTimer = setTimeout(() => {
+      if (rec.state !== 'inactive') rec.stop();
+    }, DVR_SEGMENT_MS);
+  } catch (e) {
+    console.warn('DVR segment failed:', e);
+    peer.dvrEnabled = false;
+  }
+}
+
+function openDvrPlayback(cameraId) {
+  const peer = peers.get(cameraId);
+  if (!peer || peer.dvrSegments.length === 0) {
+    showToast('📼 No footage yet — DVR buffer is building…'); return;
+  }
+
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:9997;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;padding:0;overflow:hidden';
+
+  // Header
+  const header = document.createElement('div');
+  header.style.cssText = 'width:100%;display:flex;align-items:center;gap:10px;padding:14px 16px;background:rgba(0,0,0,0.6);flex-shrink:0';
+  const title = document.createElement('span');
+  title.textContent = `📼 DVR — ${peer.name || ('Camera ' + cameraId)}`;
+  title.style.cssText = 'color:#f1f5f9;font-size:15px;font-weight:700;flex:1';
+  const stopDvrBtn = document.createElement('button');
+  stopDvrBtn.textContent = 'Stop DVR';
+  stopDvrBtn.style.cssText = 'padding:6px 12px;background:#dc2626;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer';
+  const closeBtn = document.createElement('button');
+  closeBtn.textContent = '✕';
+  closeBtn.style.cssText = 'padding:6px 12px;background:rgba(255,255,255,0.1);color:#f1f5f9;border:none;border-radius:8px;font-size:14px;cursor:pointer';
+  header.appendChild(title);
+  header.appendChild(stopDvrBtn);
+  header.appendChild(closeBtn);
+  overlay.appendChild(header);
+
+  // Video player
+  const videoEl = document.createElement('video');
+  videoEl.controls = true;
+  videoEl.style.cssText = 'width:100%;max-height:55vh;background:#000;flex-shrink:0';
+  overlay.appendChild(videoEl);
+
+  // Segment list
+  const listLabel = document.createElement('div');
+  listLabel.style.cssText = 'width:100%;padding:10px 16px 4px;color:#94a3b8;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;flex-shrink:0';
+  listLabel.textContent = `${peer.dvrSegments.length} segment${peer.dvrSegments.length !== 1 ? 's' : ''} (last ${Math.round((peer.dvrSegments.length * DVR_SEGMENT_MS) / 60000)} min)`;
+  overlay.appendChild(listLabel);
+
+  const list = document.createElement('div');
+  list.style.cssText = 'width:100%;flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:4px;padding:0 10px 20px';
+
+  // Render newest first
+  const segs = [...peer.dvrSegments].reverse();
+  segs.forEach((seg, idx) => {
+    const row = document.createElement('button');
+    const ago = Math.round((Date.now() - seg.startTs) / 60000);
+    const dur = Math.round((seg.endTs - seg.startTs) / 1000);
+    const ts  = new Date(seg.startTs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    row.textContent = `${ts}  (${ago}m ago, ${dur}s)${idx === 0 ? '  ← newest' : ''}`;
+    row.style.cssText = 'padding:10px 14px;background:rgba(255,255,255,0.05);border:1.5px solid rgba(255,255,255,0.1);border-radius:8px;color:#e2e8f0;font-size:13px;font-weight:600;text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent';
+    row.addEventListener('click', () => {
+      const url = URL.createObjectURL(seg.blob);
+      videoEl.src = url;
+      videoEl.play();
+      list.querySelectorAll('button').forEach(b => b.style.borderColor = 'rgba(255,255,255,0.1)');
+      row.style.borderColor = '#3b82f6';
+    });
+    list.appendChild(row);
+  });
+
+  // Auto-load most recent
+  if (segs.length > 0) {
+    const url = URL.createObjectURL(segs[0].blob);
+    videoEl.src = url;
+    list.querySelector('button')?.click();
+  }
+
+  overlay.appendChild(list);
+
+  stopDvrBtn.addEventListener('click', () => {
+    stopDvr(cameraId);
+    document.body.removeChild(overlay);
+    showToast('📼 DVR stopped — footage cleared');
+  });
+  closeBtn.addEventListener('click', () => document.body.removeChild(overlay));
+  document.body.appendChild(overlay);
+}
+
 // ── Motion detection ───────────────────────────────────────────
 let motionNotifEnabled  = false;
 let motionAutoSnap       = false;
 let motionFlash          = false;
 let motionFlashStillMins = 2;
+
+// ── Point-in-polygon (ray casting) ────────────────────────────
+// px, py and all point coords are normalized 0-1.
+function pointInPolygon(px, py, points) {
+  let inside = false;
+  for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+    const xi = points[i].x, yi = points[i].y;
+    const xj = points[j].x, yj = points[j].y;
+    if ((yi > py) !== (yj > py) &&
+        px < (xj - xi) * (py - yi) / (yj - yi) + xi) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
 
 function startMotion(cameraId) {
   const peer = peers.get(cameraId);
@@ -1061,17 +1253,33 @@ function startMotion(cameraId) {
       let changed = 0, total = 0;
 
       if (zone) {
-        // Only diff pixels inside the drawn zone
-        const x0 = Math.max(0, Math.floor(zone.x * W));
-        const y0 = Math.max(0, Math.floor(zone.y * H));
-        const x1 = Math.min(W, Math.ceil((zone.x + zone.w) * W));
-        const y1 = Math.min(H, Math.ceil((zone.y + zone.h) * H));
-        for (let y = y0; y < y1; y++) {
-          for (let x = x0; x < x1; x++) {
-            const i = (y * W + x) * 4;
-            const d = (Math.abs(frame[i]-prev[i]) + Math.abs(frame[i+1]-prev[i+1]) + Math.abs(frame[i+2]-prev[i+2])) / 3;
-            if (d > pixelDiff) changed++;
-            total++;
+        if (zone.type === 'polygon') {
+          // Point-in-polygon test for each pixel
+          const pts = zone.points;
+          for (let y = 0; y < H; y++) {
+            const ny = y / H;
+            for (let x = 0; x < W; x++) {
+              if (pointInPolygon(x / W, ny, pts)) {
+                const i = (y * W + x) * 4;
+                const d = (Math.abs(frame[i]-prev[i]) + Math.abs(frame[i+1]-prev[i+1]) + Math.abs(frame[i+2]-prev[i+2])) / 3;
+                if (d > pixelDiff) changed++;
+                total++;
+              }
+            }
+          }
+        } else {
+          // Legacy rect zone { x, y, w, h } normalized
+          const x0 = Math.max(0, Math.floor(zone.x * W));
+          const y0 = Math.max(0, Math.floor(zone.y * H));
+          const x1 = Math.min(W, Math.ceil((zone.x + zone.w) * W));
+          const y1 = Math.min(H, Math.ceil((zone.y + zone.h) * H));
+          for (let y = y0; y < y1; y++) {
+            for (let x = x0; x < x1; x++) {
+              const i = (y * W + x) * 4;
+              const d = (Math.abs(frame[i]-prev[i]) + Math.abs(frame[i+1]-prev[i+1]) + Math.abs(frame[i+2]-prev[i+2])) / 3;
+              if (d > pixelDiff) changed++;
+              total++;
+            }
           }
         }
       } else {
@@ -1668,31 +1876,35 @@ function openZoneEditor(cameraId) {
   const editor = document.createElement('div');
   editor.className = 'zone-editor';
   editor.style.cssText = 'position:absolute;inset:0;z-index:25;cursor:crosshair;touch-action:none;user-select:none';
-  editor.addEventListener('click', e => e.stopPropagation());
 
   // Darkened backdrop
   const backdrop = document.createElement('div');
   backdrop.style.cssText = 'position:absolute;inset:0;background:rgba(0,0,0,0.45);pointer-events:none';
   editor.appendChild(backdrop);
 
-  // Instruction
-  const hint = document.createElement('div');
-  hint.style.cssText = 'position:absolute;top:10px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.75);color:#f1f5f9;font-size:12px;font-weight:600;padding:5px 12px;border-radius:20px;pointer-events:none;white-space:nowrap;z-index:1';
-  hint.textContent = peer.zone ? 'Drag to redraw, or tap Clear Zone' : 'Drag to draw detection zone';
-  editor.appendChild(hint);
+  // SVG drawing canvas
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none';
+  svg.setAttribute('viewBox', '0 0 100 100');
+  svg.setAttribute('preserveAspectRatio', 'none');
+  editor.appendChild(svg);
 
-  // Live zone rectangle
-  const zoneRect = document.createElement('div');
-  zoneRect.style.cssText = 'position:absolute;border:2px solid #3b82f6;background:rgba(59,130,246,0.18);display:none;box-sizing:border-box;pointer-events:none';
-  editor.appendChild(zoneRect);
+  // Instruction hint
+  const hint = document.createElement('div');
+  hint.style.cssText = 'position:absolute;top:10px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.75);color:#f1f5f9;font-size:12px;font-weight:600;padding:5px 12px;border-radius:20px;pointer-events:none;white-space:nowrap;z-index:1;text-align:center;max-width:90%';
+  editor.appendChild(hint);
 
   // Buttons row
   const btnRow = document.createElement('div');
-  btnRow.style.cssText = 'position:absolute;bottom:10px;left:50%;transform:translateX(-50%);display:flex;gap:8px;z-index:1';
+  btnRow.style.cssText = 'position:absolute;bottom:10px;left:50%;transform:translateX(-50%);display:flex;gap:8px;z-index:1;flex-wrap:wrap;justify-content:center';
 
   const confirmBtn = document.createElement('button');
-  confirmBtn.textContent = 'Set Zone';
+  confirmBtn.textContent = '✓ Set Zone';
   confirmBtn.style.cssText = 'display:none;padding:8px 18px;background:#3b82f6;color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer';
+
+  const undoBtn = document.createElement('button');
+  undoBtn.textContent = '↩ Undo';
+  undoBtn.style.cssText = 'display:none;padding:8px 14px;background:rgba(30,41,59,0.9);color:#f1f5f9;border:1.5px solid #475569;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer';
 
   const clearBtn = document.createElement('button');
   clearBtn.textContent = peer.zone ? '🗑 Clear Zone' : 'Full Frame';
@@ -1703,64 +1915,170 @@ function openZoneEditor(cameraId) {
   cancelBtn.style.cssText = 'padding:8px 14px;background:transparent;color:#94a3b8;border:none;font-size:13px;cursor:pointer';
 
   btnRow.appendChild(confirmBtn);
+  btnRow.appendChild(undoBtn);
   btnRow.appendChild(clearBtn);
   btnRow.appendChild(cancelBtn);
   editor.appendChild(btnRow);
   card.appendChild(editor);
 
-  // Pre-draw existing zone
-  let pendingZone = peer.zone ? { ...peer.zone } : null;
-  if (pendingZone) {
-    _applyZoneRect(zoneRect, pendingZone);
-    zoneRect.style.display = 'block';
-    confirmBtn.style.display = 'block';
+  // ── Drawing state ──────────────────────────────────────────────
+  let points = []; // [{x,y}] normalized 0-1
+  let closed = false;
+
+  // Pre-load existing polygon zone
+  if (peer.zone?.type === 'polygon') {
+    points = peer.zone.points.map(p => ({ x: p.x, y: p.y }));
+    closed = true;
   }
 
-  // Drag logic
-  let dragStart = null;
+  function dist2d(a, b) {
+    return Math.hypot(a.x - b.x, a.y - b.y);
+  }
 
-  function relPos(e) {
+  function relPos(clientX, clientY) {
     const r = editor.getBoundingClientRect();
-    const cx = e.touches ? e.touches[0].clientX : e.clientX;
-    const cy = e.touches ? e.touches[0].clientY : e.clientY;
     return {
-      x: Math.max(0, Math.min(1, (cx - r.left)  / r.width)),
-      y: Math.max(0, Math.min(1, (cy - r.top)   / r.height)),
+      x: Math.max(0, Math.min(1, (clientX - r.left) / r.width)),
+      y: Math.max(0, Math.min(1, (clientY - r.top)  / r.height)),
     };
   }
 
-  editor.addEventListener('mousedown', e => { dragStart = relPos(e); });
-  editor.addEventListener('touchstart', e => { dragStart = relPos(e); }, { passive: true });
+  function redrawSvg() {
+    svg.innerHTML = '';
+    if (points.length === 0) return;
 
-  function onDrag(e) {
-    if (!dragStart) return;
-    const cur = relPos(e);
-    const z = {
-      x: Math.min(dragStart.x, cur.x),
-      y: Math.min(dragStart.y, cur.y),
-      w: Math.abs(cur.x - dragStart.x),
-      h: Math.abs(cur.y - dragStart.y),
-    };
-    _applyZoneRect(zoneRect, z);
-    zoneRect.style.display = 'block';
-    pendingZone = z.w > 0.04 && z.h > 0.04 ? z : null;
-    confirmBtn.style.display = pendingZone ? 'block' : 'none';
+    if (closed && points.length >= 3) {
+      // Filled polygon
+      const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+      poly.setAttribute('points', points.map(p => `${(p.x * 100).toFixed(2)},${(p.y * 100).toFixed(2)}`).join(' '));
+      poly.setAttribute('fill', 'rgba(59,130,246,0.2)');
+      poly.setAttribute('stroke', '#3b82f6');
+      poly.setAttribute('stroke-width', '0.6');
+      poly.setAttribute('stroke-dasharray', '2.5 1.5');
+      svg.appendChild(poly);
+    } else {
+      // Lines between points (open path)
+      for (let i = 1; i < points.length; i++) {
+        const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        line.setAttribute('x1', (points[i-1].x * 100).toFixed(2));
+        line.setAttribute('y1', (points[i-1].y * 100).toFixed(2));
+        line.setAttribute('x2', (points[i].x * 100).toFixed(2));
+        line.setAttribute('y2', (points[i].y * 100).toFixed(2));
+        line.setAttribute('stroke', '#3b82f6');
+        line.setAttribute('stroke-width', '0.6');
+        svg.appendChild(line);
+      }
+      // Closing dashed guide line (if 3+ points)
+      if (points.length >= 3) {
+        const guide = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        guide.setAttribute('x1', (points[points.length-1].x * 100).toFixed(2));
+        guide.setAttribute('y1', (points[points.length-1].y * 100).toFixed(2));
+        guide.setAttribute('x2', (points[0].x * 100).toFixed(2));
+        guide.setAttribute('y2', (points[0].y * 100).toFixed(2));
+        guide.setAttribute('stroke', 'rgba(59,130,246,0.35)');
+        guide.setAttribute('stroke-width', '0.5');
+        guide.setAttribute('stroke-dasharray', '1.5 1.5');
+        svg.appendChild(guide);
+      }
+    }
+
+    // Vertex dots
+    points.forEach((p, idx) => {
+      const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      c.setAttribute('cx', (p.x * 100).toFixed(2));
+      c.setAttribute('cy', (p.y * 100).toFixed(2));
+      c.setAttribute('r',  idx === 0 ? '2.8' : '1.8');
+      c.setAttribute('fill',         idx === 0 ? '#93c5fd' : '#3b82f6');
+      c.setAttribute('stroke',       '#fff');
+      c.setAttribute('stroke-width', '0.5');
+      svg.appendChild(c);
+    });
+
+    // "①" label near first point (open mode only)
+    if (!closed && points.length > 0) {
+      const txt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      txt.setAttribute('x', (points[0].x * 100 + 3.5).toFixed(2));
+      txt.setAttribute('y', (points[0].y * 100 - 2).toFixed(2));
+      txt.setAttribute('fill', '#93c5fd');
+      txt.setAttribute('font-size', '5');
+      txt.setAttribute('font-weight', 'bold');
+      txt.textContent = '①';
+      svg.appendChild(txt);
+    }
   }
-  editor.addEventListener('mousemove', onDrag);
-  editor.addEventListener('touchmove', e => { e.preventDefault(); onDrag(e); }, { passive: false });
 
-  const endDrag = () => { dragStart = null; };
-  editor.addEventListener('mouseup',  endDrag);
-  editor.addEventListener('touchend', endDrag);
+  function updateButtons() {
+    confirmBtn.style.display = closed ? 'block' : 'none';
+    undoBtn.style.display    = (points.length > 0 && !closed) ? 'block' : 'none';
+    if (closed) {
+      hint.textContent = 'Polygon set • tap ✓ to confirm, or tap canvas to redraw';
+    } else if (points.length === 0) {
+      hint.textContent = 'Tap to add points • tap near ① to close (3 min)';
+    } else if (points.length < 3) {
+      const need = 3 - points.length;
+      hint.textContent = `${points.length} point${points.length > 1 ? 's' : ''} — add ${need} more`;
+    } else {
+      hint.textContent = `${points.length} points — tap near ① to close`;
+    }
+  }
+
+  // Initial render
+  redrawSvg();
+  updateButtons();
+
+  // ── Click / tap handler ────────────────────────────────────────
+  function handleTap(clientX, clientY) {
+    const p = relPos(clientX, clientY);
+
+    if (closed) {
+      // Reset to redraw
+      points = [];
+      closed = false;
+      redrawSvg();
+      updateButtons();
+      return;
+    }
+
+    // Close polygon if tapping near first vertex and have 3+ points
+    if (points.length >= 3 && dist2d(p, points[0]) < 0.07) {
+      closed = true;
+      redrawSvg();
+      updateButtons();
+      return;
+    }
+
+    points.push(p);
+    redrawSvg();
+    updateButtons();
+  }
+
+  editor.addEventListener('click', e => {
+    if (e.target.closest('button')) return;
+    e.stopPropagation();
+    handleTap(e.clientX, e.clientY);
+  });
+
+  // Touch: use touchend to avoid doubling with click on mobile
+  editor.addEventListener('touchend', e => {
+    if (e.target.closest('button')) return;
+    e.preventDefault();
+    const t = e.changedTouches[0];
+    handleTap(t.clientX, t.clientY);
+  }, { passive: false });
+
+  // ── Button handlers ────────────────────────────────────────────
+  undoBtn.addEventListener('click', e => {
+    e.stopPropagation();
+    if (points.length > 0 && !closed) { points.pop(); redrawSvg(); updateButtons(); }
+  });
 
   confirmBtn.addEventListener('click', e => {
     e.stopPropagation();
-    if (pendingZone) peer.zone = pendingZone;
+    if (closed && points.length >= 3) {
+      peer.zone = { type: 'polygon', points: points.map(p => ({ x: p.x, y: p.y })) };
+    }
     updateZoneOverlay(cameraId);
     editor.remove();
-    // Auto-enable motion detection when a zone is confirmed — setting a zone
-    // without enabling motion does nothing visible, which is the most common
-    // "why isn't this working" trap.
     if (peer.zone && !peer.motion) {
       startMotion(cameraId);
       const motionBtn = document.querySelector(`#card-${cameraId} [data-action="motion"]`);
@@ -1768,11 +2086,12 @@ function openZoneEditor(cameraId) {
       showToast('🔳 Zone set · 🎯 Motion detection enabled');
     } else if (peer.zone) {
       updateMotionIndicator(cameraId);
-      showToast('🔳 Zone set');
+      showToast('🔳 Polygon zone set');
     } else {
       updateMotionIndicator(cameraId);
     }
   });
+
   clearBtn.addEventListener('click', e => {
     e.stopPropagation();
     const had = !!peer.zone;
@@ -1782,6 +2101,7 @@ function openZoneEditor(cameraId) {
     editor.remove();
     showToast(had ? '🔳 Zone cleared — watching full frame' : '🔳 Full frame mode');
   });
+
   cancelBtn.addEventListener('click', e => { e.stopPropagation(); editor.remove(); });
 }
 
@@ -1806,19 +2126,53 @@ function updateZoneOverlay(cameraId) {
     return;
   }
 
-  if (!ov) {
-    ov = document.createElement('div');
-    ov.className = 'zone-overlay';
-    ov.style.cssText = 'position:absolute;border:2px dashed rgba(59,130,246,0.8);pointer-events:none;box-sizing:border-box';
-    // Corner label
-    const lbl = document.createElement('div');
-    lbl.className = 'zone-label';
-    lbl.textContent = 'ZONE';
-    lbl.style.cssText = 'position:absolute;top:-1px;left:0;background:#3b82f6;color:#fff;font-size:9px;font-weight:700;padding:1px 5px;border-radius:0 0 4px 0;letter-spacing:0.5px';
-    ov.appendChild(lbl);
-    card.appendChild(ov);
+  if (peer.zone.type === 'polygon') {
+    // SVG polygon overlay — rebuild if wrong element type
+    if (!ov || ov.tagName?.toLowerCase() !== 'svg') {
+      ov?.remove();
+      ov = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      ov.className = 'zone-overlay';
+      ov.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible';
+      ov.setAttribute('viewBox', '0 0 100 100');
+      ov.setAttribute('preserveAspectRatio', 'none');
+      card.appendChild(ov);
+    }
+    ov.innerHTML = '';
+    const pts = peer.zone.points;
+    const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+    poly.setAttribute('points', pts.map(p => `${(p.x*100).toFixed(2)},${(p.y*100).toFixed(2)}`).join(' '));
+    poly.setAttribute('fill',           'rgba(59,130,246,0.1)');
+    poly.setAttribute('stroke',         'rgba(59,130,246,0.8)');
+    poly.setAttribute('stroke-width',   '0.6');
+    poly.setAttribute('stroke-dasharray', '2 1.5');
+    ov.appendChild(poly);
+    // ZONE label near first vertex
+    const txt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    txt.setAttribute('x', (pts[0].x * 100).toFixed(2));
+    txt.setAttribute('y', Math.max(5, pts[0].y * 100 - 1).toFixed(2));
+    txt.setAttribute('fill',        '#3b82f6');
+    txt.setAttribute('font-size',   '4');
+    txt.setAttribute('font-weight', 'bold');
+    txt.setAttribute('letter-spacing', '0.3');
+    txt.textContent = 'ZONE';
+    ov.appendChild(txt);
+  } else {
+    // Legacy rect overlay { x, y, w, h }
+    if (!ov || ov.tagName?.toLowerCase() === 'svg') {
+      ov?.remove();
+      ov = document.createElement('div');
+      ov.className = 'zone-overlay';
+      ov.style.cssText = 'position:absolute;border:2px dashed rgba(59,130,246,0.8);pointer-events:none;box-sizing:border-box';
+      const lbl = document.createElement('div');
+      lbl.className = 'zone-label';
+      lbl.textContent = 'ZONE';
+      lbl.style.cssText = 'position:absolute;top:-1px;left:0;background:#3b82f6;color:#fff;font-size:9px;font-weight:700;padding:1px 5px;border-radius:0 0 4px 0;letter-spacing:0.5px';
+      ov.appendChild(lbl);
+      card.appendChild(ov);
+    }
+    _applyZoneRect(ov, peer.zone);
   }
-  _applyZoneRect(ov, peer.zone);
+
   if (zoneBtn) { zoneBtn.classList.add('active'); zoneBtn.title = 'Detection zone (active — tap to edit)'; }
 }
 
@@ -1861,13 +2215,25 @@ document.getElementById('settingsBtn').addEventListener('click', () => {
   document.getElementById('globalMotionToggle').classList.toggle('on', globalMotion);
   document.getElementById('motionAutoSnapToggle').classList.toggle('on', motionAutoSnap);
   document.getElementById('motionFlashToggle').classList.toggle('on', motionFlash);
+  document.getElementById('motionFlashStillRow').style.display = motionFlash ? '' : 'none';
   document.getElementById('smartDetectionToggle').classList.toggle('on', smartDetectionEnabled);
+  document.getElementById('smartDetectionStatusRow').style.display = smartDetectionEnabled ? '' : 'none';
+  document.getElementById('smartClassesRow').style.display        = smartDetectionEnabled ? 'flex' : 'none';
   document.getElementById('muteAllToggle').classList.toggle('on', muteAll);
   document.getElementById('mirrorToggle').classList.toggle('on', mirrorFront);
   document.getElementById('alertSoundToggle').classList.toggle('on', alertSound);
   document.getElementById('alertVibrationToggle').classList.toggle('on', alertVibration);
   document.querySelectorAll('#alertCooldownSeg .seg-btn').forEach(b => {
     b.classList.toggle('active', parseInt(b.dataset.secs) === alertCooldown);
+  });
+  document.querySelectorAll('#motionSensSeg .seg-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.sens === motionSens);
+  });
+  document.querySelectorAll('#motionFlashStillSeg .seg-btn').forEach(b => {
+    b.classList.toggle('active', parseInt(b.dataset.mins) === motionFlashStillMins);
+  });
+  document.querySelectorAll('#photoQualitySeg .seg-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.q === photoQuality);
   });
   openPanel('settingsPanel');
   // Web Notification permission not needed — native AndroidBridge.fireMotionAlert
@@ -2150,6 +2516,53 @@ document.addEventListener('keydown', (e) => {
 function escHtml(s) {
   return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
+
+// ── Two-way audio: monitor mic toggle ─────────────────────────
+document.getElementById('monitorMicBtn').addEventListener('click', toggleMonitorMic);
+
+async function toggleMonitorMic() {
+  const btn = document.getElementById('monitorMicBtn');
+  if (monitorMicEnabled) {
+    // Turn off: stop tracks, send silence to all cameras
+    monitorMicEnabled = false;
+    if (monitorAudioStream) {
+      monitorAudioStream.getTracks().forEach(t => t.stop());
+      monitorAudioStream = null;
+    }
+    peers.forEach(peer => {
+      if (peer.audioSendTransceiver) {
+        peer.audioSendTransceiver.sender.replaceTrack(null).catch(() => {});
+      }
+    });
+    btn.classList.remove('active');
+    btn.title = 'Speak to all cameras (monitor mic off)';
+    showToast('🎤 Monitor mic off');
+  } else {
+    // Turn on: capture mic, send to all connected cameras
+    try {
+      monitorAudioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      monitorMicEnabled  = true;
+      const track = monitorAudioStream.getAudioTracks()[0];
+      peers.forEach(peer => {
+        if (peer.audioSendTransceiver) {
+          peer.audioSendTransceiver.sender.replaceTrack(track).catch(() => {});
+        }
+      });
+      btn.classList.add('active');
+      btn.title = 'Monitor mic ON — tap to mute';
+      showToast('🎤 Monitor mic on — cameras can hear you');
+    } catch (e) {
+      showToast('Mic access denied — check browser permissions');
+      console.warn('Monitor mic failed:', e);
+    }
+  }
+}
+
+// ── Restore UI state from persisted settings ───────────────────
+// (DOM is ready because script is at end of body)
+document.getElementById('motionFlashStillRow').style.display = motionFlash ? '' : 'none';
+document.getElementById('smartDetectionStatusRow').style.display = smartDetectionEnabled ? '' : 'none';
+document.getElementById('smartClassesRow').style.display        = smartDetectionEnabled ? 'flex' : 'none';
 
 // ── Boot ───────────────────────────────────────────────────────
 // Android (Kotlin) passes the LAN IP in the URL fragment to avoid

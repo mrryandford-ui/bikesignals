@@ -15,7 +15,7 @@ CamNet is a peer-to-peer multi-phone LAN security camera app. One phone acts as 
 - **Port 3443 (HTTPS):** SslProxy (raw TCP byte-copying SSL termination) for Camera phones on LAN
 
 ### WebRTC Signaling Flow
-1. Monitor starts session (6-char room code, QR code, LAN IP)
+1. Monitor starts session (8-char room code, QR code, LAN IP)
 2. Camera joins with code → WebSocket handshake with signaling server
 3. ICE candidates & SDP offers/answers exchanged via WS
 4. Peer connection established → audio/video stream flows directly between phones
@@ -43,7 +43,7 @@ CamNet is a peer-to-peer multi-phone LAN security camera app. One phone acts as 
 ### Monitor (Viewer)
 - ✅ Real-time multi-camera grid (auto, 1, 2, 3 col layout)
 - ✅ Per-camera controls: snapshot, record, timelapse, mute, nightvision, flip, quality, stealth
-- ✅ Motion detection: pixel-diff on downsampled canvas, zone picker with "clear zone" option
+- ✅ Motion detection: pixel-diff on downsampled canvas, polygon zone picker with point-in-polygon analysis
 - ✅ **Smart Detection (AI):** TensorFlow.js + COCO-SSD (lite_mobilenet_v2)
   - Lazy-loaded from jsDelivr CDN (~3 MB)
   - Filters detected objects by `smartClasses` (8 configurable: Person/Car/Motorcycle/etc.)
@@ -56,6 +56,9 @@ CamNet is a peer-to-peer multi-phone LAN security camera app. One phone acts as 
 - ✅ Fullscreen: CSS-based (native API fails on Android WebView)
 - ✅ Session info panel: room code, QR code, copy code/link buttons
 - ✅ Auto-snapshot and flash on motion (with persistence across disconnects)
+- ✅ **Auto-update:** On launch, checks GitHub Releases API; shows dialog if newer APK found. Downloads via `DownloadManager`, installs via `FileProvider`. "⬆ Check for updates" button on home screen for manual trigger.
+- ✅ **Two-way audio:** Monitor mic → all connected cameras. 🎤 header button; camera plays via hidden `<audio>`, shows "🎤 MONITOR" badge when active. Uses `sendrecv` transceiver + `replaceTrack`.
+- ✅ **DVR rolling buffer:** Per-camera 24/7 rolling 30-min buffer (1-min segments, 30 max). 📼 button per card; playback modal with segment list (newest first) and video player. Oldest segments auto-purged.
 
 ### Camera (Phone)
 - ✅ Join session with 6-char code or auto-join via QR `?room=XXXX` param
@@ -82,6 +85,68 @@ CamNet is a peer-to-peer multi-phone LAN security camera app. One phone acts as 
 ---
 
 ## Known Issues & Fixes
+
+### Fixed (post-v1.92 — back navigation + CI hardening)
+- ✅ **Back from Monitor viewer lands on spinner, not home (MainActivity.kt + AndroidBridge.kt):**
+  - Root cause: `startMonitor()` loads a "Starting server…" spinner page before `loadUrl(viewer.html)`. WebView history was `[home → spinner → viewer.html]`; `canGoBack()` returned true so pressing back surfaced the spinner, not home.
+  - Fix 1: `handleOnBackPressed` checks `webView.url.startsWith("https://localhost")` — if true, calls `showHome()` directly, skipping the stale spinner in back-stack.
+  - Fix 2: `AndroidBridge.startMonitor()` calls `activity.webView.clearHistory()` before `loadUrl(viewer.html)` so the spinner is pruned from history at the source.
+  - Camera flow (setup → camera.html → back → setup) unaffected — camera URLs use LAN IP, not localhost.
+- ✅ **CI: GitHub Release step failed with 403 (build-apk.yml):**
+  - Root cause: `softprops/action-gh-release@v2` needs `contents: write`; GitHub Actions defaults to read-only token for newer repos.
+  - Fix: Added `permissions: contents: write` at the job level.
+- ✅ **CI: `extractSslCert` Gradle task caused AGP 8.2.x build failure (build.gradle):**
+  - Root cause: `tasks.configureEach` inside `afterEvaluate` forces all lazy AGP tasks to realize eagerly, breaking AGP's internal configuration order.
+  - Fix: Replaced the `configureEach` block with `preBuild.dependsOn extractSslCert` — same pattern as `copyWebAssets`, runs before all compile tasks.
+
+### Fixed (pre-v1.92 — connection, update, and UI fixes)
+- ✅ **Join URL missing `/camera.html` after QR scan (AndroidBridge.kt `openCameraFromQR`):**
+  - Built `$base/camera.html$query` correctly; previous code omitted the path segment.
+  - Added `window._navigatingAway` flag in setupHtml so fast double-taps can't fire two navigations.
+- ✅ **Service worker cached `camera.html?room=X&nonce=Y` without query params (sw.js):**
+  - Network-first bypass added for any URL with query params — prevents stale cached page returning without room/nonce.
+  - Cache version bumped to v10.
+- ✅ **Nonce/room params stripped from camera.html URL during WebView navigation (AndroidBridge.kt):**
+  - Android WebView was silently dropping query params on `loadUrl`. Fixed by verifying URL construction and adding diagnostic logging (`Log.i`) at `onLoadUrl` entry.
+- ✅ **Self-signed cert not trusted for LAN IP connections (network_security_config.xml):**
+  - Added cert pin for all domains (not just localhost) so camera phones on LAN connecting to `https://192.168.x.x:3443` pass cert validation without a browser warning.
+- ✅ **`promptInstall` crashed / silently failed on 0-byte APK (MainActivity.kt):**
+  - Added `file.exists() && file.length() > 0` guard before `FileProvider.getUriForFile`. Added `Log.i` with file path and size so download failures are visible in logcat.
+- ✅ **Password input in Kotlin setupHtml expanded to fill screen (MainActivity.kt):**
+  - Input had no height constraint inside a flex column — added `flex:none` inline style.
+- ✅ **No manual update trigger on home screen (MainActivity.kt + AndroidBridge.kt):**
+  - Added "⬆ Check for updates" button to `homeHtml()`, wired to `AndroidBridge.checkForUpdateManual()`.
+  - `checkForUpdateManual()` JavascriptInterface added — shows a toast first, then calls `checkForUpdate(manual=true)` for user-visible error feedback.
+- ✅ **Update version compare broken + APK install failed on Moto G (MainActivity.kt):**
+  - Version compare was comparing strings instead of ints — `"9" > "10"` was true. Fixed to parse int before compare.
+  - Moto G stores downloads in a different path; switched to `getExternalFilesDir(DIRECTORY_DOWNLOADS)` which is app-specific and always writable.
+- ✅ **Motion detection `globalMotion` default wrong + card/panel out of sync (viewer.js):**
+  - `globalMotion` was defaulting to `false` despite Sprint 1 intent to default ON. Corrected to `true`.
+  - Motion button on camera card and settings panel toggle were not keeping each other in sync on open — fixed bidirectional sync.
+- ✅ **QR nonce dropped from camera.html URL + missing join diagnostics (AndroidBridge.kt + viewer.js):**
+  - Nonce was not appended to the `camera.html` destination URL built in `openCameraFromQR`. Fixed.
+  - Added `Log.i` for room/nonce values at QR parse time so join failures are traceable without USB adb.
+
+### Fixed (v1.92 — Two-way audio, DVR, polygon zones, motion alert regressions)
+- ✅ **Settings not fully rehydrated from localStorage on boot (viewer.js):**
+  - `motionAutoSnap`, `motionFlash`, `motionFlashStillMins` were declared but never loaded via `lsLoad` — values always reset to defaults on page reload. Added all three `lsLoad` calls at boot.
+  - `globalMotion` default corrected `false` → `true` (Sprint 1 set it to true but a later edit regressed it).
+  - Settings panel open handler now also syncs `motionFlashStillRow` visibility, segment control active buttons, and smart detection rows — previously stale toggles on re-open.
+  - Boot-time UI restoration added for `motionFlashStillRow`, `smartDetectionStatusRow`, `smartClassesRow`.
+- ✅ **Two-way audio (viewer.js + camera.js + viewer.html + camera.html):**
+  - Monitor: `getUserMedia({audio:true})` → `replaceTrack()` on each peer's audio send transceiver. `🎤` button in header toggles mic. `monitorAudioStream` + `monitorMicEnabled` track state.
+  - Per-peer `audioSendTransceiver` stored after SDP negotiation via `_storeAudioSendTransceiver()`. New peers inherit live mic track if mic is active.
+  - Camera: `offerToReceiveAudio: true` in createPeer(), `pc.ontrack` plays incoming audio via hidden `<audio id="monitorAudio">`. "🎤 MONITOR" badge shows/hides on track mute/unmute events.
+  - Transceiver direction changed from `recvonly` → `sendrecv` for the audio transceiver in viewer.js.
+- ✅ **DVR rolling buffer (viewer.js):**
+  - `startDvr(cameraId)` / `stopDvr(cameraId)` / `_startDvrSegment(cameraId)`: 1-min MediaRecorder segments on received stream. Auto-chains via `onstop`. Purges oldest when >30 segments (`DVR_SEGMENT_MS = 60_000`, `DVR_MAX_SEGMENTS = 30`).
+  - `openDvrPlayback(cameraId)`: modal with video player + segment list newest-first. Object URLs created on demand; modal cleanup revokes them to avoid memory leaks.
+  - 📼 per-camera button in card controls row.
+- ✅ **Polygon motion zones (viewer.js):**
+  - `openZoneEditor` rewritten: click-to-add-vertices SVG editor. Tap near ① (first vertex, 3+ points) to close polygon. Undo button removes last vertex. Pre-loads existing polygon for re-editing. Closed polygon shown filled; open path shows dashed guide line back to start.
+  - `analyze()` upgraded: `zone.type === 'polygon'` branch uses `pointInPolygon()` (ray casting, O(vertices) per pixel, runs on 160×120 canvas). Legacy rect zones (`{x,y,w,h}`) fully backward-compatible.
+  - `updateZoneOverlay()` upgraded: SVG `<polygon>` element for polygon zones; existing CSS div for legacy rect zones. ZONE label rendered as SVG `<text>` near first vertex.
+  - Zone stored as `{ type: 'polygon', points: [{x,y},...] }` (normalized 0-1).
 
 ### Fixed (Sprint 3)
 - ✅ **Quality change mid-recording breaks MediaRecorder (camera.js):**
@@ -131,7 +196,7 @@ CamNet is a peer-to-peer multi-phone LAN security camera app. One phone acts as 
 - ✅ **WebSocket SSL cert invalid on Samsung — `wss://localhost:3443` fails (AndroidBridge.kt + viewer.js):** p12 cert is unchanged (confirmed identical). Root cause: Samsung WebView's JS network stack doesn't trust NSC cert anchors for JS-initiated WebSocket connections. Fix: Kotlin passes `wsport=PORT` in the URL fragment alongside `lan=IP`. viewer.js uses `ws://localhost:PORT` (plain, no SSL) when `wsport` is present and `AndroidBridge` is defined. Chrome/WebView allows `ws://localhost` from `https://` pages via the localhost mixed-content exemption — no cert needed.
 
 ### Fixed (v1.85 — auto-sync SSL cert + WS diagnostics)
-- ✅ **Stale pinned cert causing WSS failure (build.gradle):** Added `extractSslCert` Gradle task that reads `camnet-ssl.p12`, extracts the current cert, and writes `res/raw/camnet_ssl_cert.pem` at build time. Runs before all compile/process tasks via `configureEach`. Cert in NSC trust anchor now always matches what the server actually presents.
+- ✅ **Stale pinned cert causing WSS failure (build.gradle):** Added `extractSslCert` Gradle task that reads `camnet-ssl.p12`, extracts the current cert, and writes `res/raw/camnet_ssl_cert.pem` at build time. Wired via `preBuild.dependsOn extractSslCert` (same pattern as `copyWebAssets`) so it always runs before compilation. Cert in NSC trust anchor now always matches what the server actually presents.
 - ✅ **WebSocket diagnostic logging (viewer.js `connectWS()`):** Logs URL, open, close (code+reason), and error events to `logDiagnostic` (→ `crash_report.txt`) and console. On WS error, shows `WS-ERR` in the session code box so failures are visible without USB debugging.
 
 ### Fixed (v1.84 — bypass Samsung fetch() SSL bug for LAN IP detection)
@@ -383,12 +448,21 @@ CamNet is a peer-to-peer multi-phone LAN security camera app. One phone acts as 
 
 ## Build & Deployment
 
-### Android
+### CI / GitHub Actions (`build-apk.yml`)
+Every push to `main` or `claude/*` branches triggers a build:
+1. Java 17 (Temurin) + Android SDK 34 + Gradle 8.2.1 installed
+2. Signing keystore (`camnet-debug.jks`) restored from Actions cache (generated once, reused so APK updates install without uninstalling)
+3. `BUILD_NUMBER` env var set to `github.run_number`; `build.gradle` reads it via `System.getenv("BUILD_NUMBER")` — no `sed` manipulation needed
+4. `gradle assembleDebug --no-daemon` builds the APK
+5. APK uploaded as a workflow artifact (90-day retention)
+6. GitHub Release created with tag `v{run_number}` and APK attached (`permissions: contents: write` required at job level)
+
+### Android (local)
 ```bash
 cd android
-# Requires Android SDK, NDK, Kotlin compiler
-./gradlew assembleRelease
-# APK generated at: app/build/outputs/apk/release/
+# No gradlew wrapper — use system gradle or Android Studio
+gradle assembleDebug
+# APK: app/build/outputs/apk/debug/app-debug.apk
 ```
 
 ### Web (Development)
@@ -399,8 +473,8 @@ npm start  # or: node public/server.js
 ```
 
 ### Deployment Steps
-1. Build APK on development machine
-2. Install on Monitor phone + all Camera phones
+1. Push to branch → CI builds APK automatically → GitHub Release published
+2. Install APK on Monitor phone + all Camera phones (app auto-updates on launch)
 3. Start Monitor app → note session code / QR code
 4. Open Camera app on each phone → enter code → stream begins
 5. All communication stays on LAN (no internet required)
@@ -429,10 +503,11 @@ npm start  # or: node public/server.js
 
 - [ ] Person detection with face recognition (privacy-local)
 - [ ] Geofencing trigger (location-based alerting)
-- [ ] Custom motion zones per camera (drawn polygons)
-- [ ] 24/7 DVR mode (rolling buffer, search by time)
-- [ ] Two-way audio (mic from Monitor phone to Camera)
-- [ ] Night vision mode (IR LED control, if supported)
+- [x] Custom motion zones per camera (polygon, v1.92)
+- [x] 24/7 DVR mode (rolling buffer, v1.92)
+- [x] Two-way audio (monitor mic → cameras, v1.92)
+- [x] Night vision mode (CSS filter on video, already implemented)
+- [ ] DVR time-index search / scrub across segments
 - [ ] Cloud backup (optional, user-controlled)
 
 ---
@@ -516,4 +591,4 @@ camnet/
 
 ---
 
-**Last Updated:** May 2026 (v1.91 — version auto-set from CI run number)
+**Last Updated:** May 2026 (v1.92 + post-release fixes — two-way audio, DVR rolling buffer, polygon motion zones, back-navigation fix, CI hardening)

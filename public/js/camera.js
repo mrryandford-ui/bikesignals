@@ -398,8 +398,27 @@ async function createPeer() {
     }, 30_000);
   }
 
+  // offerToReceiveAudio: true adds a recvonly m-line so the viewer can send
+  // monitor mic audio back to this camera (two-way audio).
+  pc.ontrack = (e) => {
+    if (e.track.kind !== 'audio') return;
+    // Play monitor's mic through the hidden <audio> element.
+    const el = document.getElementById('monitorAudio');
+    if (!el) return;
+    if (!el.srcObject) el.srcObject = new MediaStream();
+    el.srcObject.addTrack(e.track);
+    el.play().catch(() => {});
+    // Show "MONITOR" badge so the camera user knows the monitor is talking.
+    const badge = document.getElementById('monitorTalkingBadge');
+    if (badge) {
+      e.track.addEventListener('mute',   () => { badge.style.display = 'none'; });
+      e.track.addEventListener('unmute', () => { badge.style.display = ''; });
+      badge.style.display = e.track.enabled ? '' : 'none';
+    }
+  };
+
   const offer = await pc.createOffer({
-    offerToReceiveAudio: false,
+    offerToReceiveAudio: true,  // reserve slot for monitor mic → camera
     offerToReceiveVideo: false,
   });
   await pc.setLocalDescription(offer);

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
   <title>CamNet – Camera</title>
   <link rel="manifest" href="/manifest.json">
   <meta name="theme-color" content="#090910">
@@ -59,6 +59,7 @@
         <button class="icon-btn" id="backBtn" title="Back to setup" style="background:transparent;color:rgba(255,255,255,0.7);font-size:20px;width:32px;height:32px;">‹</button>
         <span class="live-badge">LIVE</span>
         <span class="live-room" id="liveRoomCode">------</span>
+        <div id="monitorTalkingBadge" style="display:none;background:rgba(59,130,246,0.85);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:0.5px">🎤 MONITOR</div>
         <div class="live-conn-status">
           <span class="dot connecting" id="connDot"></span>
           <span id="connText">Waiting…</span>
@@ -133,6 +134,8 @@
   </div>
 </div>
 
+<!-- Hidden audio element plays monitor's mic when two-way audio is active -->
+<audio id="monitorAudio" autoplay playsinline style="display:none"></audio>
 <script src="/js/camera.js"></script>
 </body>
 </html>

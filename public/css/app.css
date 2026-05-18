@@ -144,9 +144,11 @@ input[type="text"]::placeholder { color: var(--text-muted); }
   width: 100%;
   background: var(--surface);
   border-radius: 20px 20px 0 0;
-  padding: 24px 20px 40px;
-  max-height: 80vh;
+  padding: 24px 20px max(40px, calc(20px + env(safe-area-inset-bottom)));
+  max-height: 85vh;
   overflow-y: auto;
+  /* Prevent overscroll chaining on iOS */
+  overscroll-behavior: contain;
 }
 .panel-handle {
   width: 36px; height: 4px;
@@ -264,11 +266,12 @@ input[type="text"]::placeholder { color: var(--text-muted); }
 ═══════════════════════════════════════════════════════════════ */
 .home-page {
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 32px 20px 48px;
+  padding: 32px 20px max(48px, calc(24px + env(safe-area-inset-bottom)));
   gap: 0;
 }
 .home-logo {
@@ -337,6 +340,7 @@ input[type="text"]::placeholder { color: var(--text-muted); }
 ═══════════════════════════════════════════════════════════════ */
 .viewer-app {
   height: 100vh;
+  height: 100dvh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -441,15 +445,15 @@ input[type="text"]::placeholder { color: var(--text-muted); }
   color: var(--text-muted);
 }
 .room-code {
-  font-size: 40px;
+  font-size: clamp(26px, 8vw, 38px);
   font-weight: 900;
-  letter-spacing: 6px;
+  letter-spacing: clamp(3px, 1.2vw, 6px);
   font-variant-numeric: tabular-nums;
   color: var(--accent);
   background: rgba(59,130,246,0.08);
-  padding: 12px 20px;
+  padding: 12px 16px;
   border-radius: var(--radius);
-  min-width: 220px;
+  width: 100%;
   text-align: center;
 }
 #qrContainer {
@@ -715,6 +719,7 @@ input[type="text"]::placeholder { color: var(--text-muted); }
 ═══════════════════════════════════════════════════════════════ */
 .camera-app {
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
 }
@@ -726,8 +731,10 @@ input[type="text"]::placeholder { color: var(--text-muted); }
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 32px 20px 48px;
-  gap: 24px;
+  padding: 28px 20px max(40px, calc(20px + env(safe-area-inset-bottom)));
+  gap: 20px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .setup-title {
   text-align: center;
@@ -831,7 +838,7 @@ input[type="text"]::placeholder { color: var(--text-muted); }
 .cam-bottom-bar {
   background: var(--surface);
   border-top: 1px solid var(--border);
-  padding: 14px 16px 28px;
+  padding: 14px 16px max(28px, calc(12px + env(safe-area-inset-bottom)));
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -900,11 +907,155 @@ input[type="text"]::placeholder { color: var(--text-muted); }
 .quality-item .q-name  { font-weight: 700; font-size: 14px; }
 .quality-item .q-desc  { font-size: 12px; color: var(--text-muted); margin-left: auto; }
 
-/* ── Responsive ────────────────────────────────────────────── */
-@media (max-width: 400px) {
-  .feed-grid.l-2 { grid-template-columns: 1fr; }
-  .feed-grid.l-3 { grid-template-columns: 1fr 1fr; }
+/* ══════════════════════════════════════════════════════════════
+   RESPONSIVE — small phone → large tablet
+   Breakpoints:
+     xs  ≤374px  (iPhone SE 1st gen, old narrow Androids)
+     sm  ≤479px  (typical small phone)
+     md  480–599px (large phone / small landscape)
+     lg  ≥600px  (phablet / small tablet portrait)
+     xl  ≥768px  (tablet portrait)
+     2xl ≥1024px (tablet landscape)
+══════════════════════════════════════════════════════════════ */
+
+/* ── xs: ≤374px — squeeze everything that can overflow ─────── */
+@media (max-width: 374px) {
+  /* Header: hide non-critical text, shrink icon buttons */
+  .viewer-header            { gap: 3px; padding: 8px 6px; }
+  .viewer-header .icon-btn  { width: 30px; height: 30px; font-size: 13px; }
+  .header-brand             { font-size: 13px; }
+  .cam-count-badge          { display: none; }          /* room for buttons */
+  #wsStatusText             { display: none; }          /* dot still shows state */
+
+  /* Session box: tighter */
+  .session-box              { padding: 18px 14px; gap: 10px; }
+
+  /* Setup: less vertical padding so keyboard doesn't clip form */
+  .setup-screen             { padding: 16px 14px max(24px, calc(12px + env(safe-area-inset-bottom))); gap: 14px; }
+  .setup-title h1           { font-size: 20px; }
+  .setup-form               { gap: 10px; }
+
+  /* Panel: seg-ctrl rows stack (label above, control full-width) */
+  .panel-row                { flex-wrap: wrap; row-gap: 6px; }
+  .panel-row > .seg-ctrl    { width: 100%; }
+  .seg-btn                  { padding: 7px 5px; font-size: 11px; }
+  .panel-label              { font-size: 13px; }
+  .panel-sheet              { padding-left: 14px; padding-right: 14px; }
+
+  /* Camera live controls: narrower icons */
+  .cam-ctrl-btn             { padding: 8px 5px; font-size: 10px; }
+  .cam-ctrl-btn .ctrl-icon  { width: 38px; height: 38px; font-size: 18px; }
+
+  /* Feed grid: force single column on l-2 */
+  .feed-grid.l-2            { grid-template-columns: 1fr; }
+  .feed-grid.l-3            { grid-template-columns: 1fr 1fr; }
 }
+
+/* ── sm: ≤479px ─────────────────────────────────────────────── */
+@media (max-width: 479px) {
+  /* Home page: less top space */
+  .home-page                { padding: 24px 16px max(40px, calc(24px + env(safe-area-inset-bottom))); }
+  .home-sub                 { margin-bottom: 32px; }
+
+  /* Live status bar: tighter gap */
+  .live-status-bar          { padding: 10px 12px; gap: 6px; }
+  .live-room                { font-size: 12px; letter-spacing: 1.5px; }
+
+  /* QR container: let it breathe but not overflow */
+  #qrContainer canvas,
+  #qrContainer img          { max-width: 100%; height: auto; }
+
+  /* Session actions: stack if too narrow */
+  .session-actions          { flex-direction: column; }
+  .session-actions .btn     { flex: none; width: 100%; }
+}
+
+/* ── Feed grid ≤400px ────────────────────────────────────────── */
+@media (max-width: 400px) {
+  .feed-grid.l-2            { grid-template-columns: 1fr; }
+  .feed-grid.l-3            { grid-template-columns: 1fr 1fr; }
+}
+
+/* ── lg: ≥600px — phablet / small tablet ────────────────────── */
+@media (min-width: 600px) {
+  /* Panel sheets: cap width and center — no more full-width drawer on tablet */
+  .panel                    { justify-content: center; }
+  .panel-sheet              { max-width: 520px; margin: 0 auto; border-radius: 20px; }
+
+  /* Home cards: side-by-side on wider screens */
+  .home-cards               { flex-direction: row; max-width: 640px; }
+  .role-card                { flex: 1; }
+
+  /* Session box: slightly wider */
+  .session-box              { max-width: 400px; }
+
+  /* Setup form: wider */
+  .setup-form               { max-width: 420px; }
+
+  /* Camera controls: bigger tap targets */
+  .cam-ctrl-btn .ctrl-icon  { width: 50px; height: 50px; font-size: 22px; }
+  .cam-ctrl-btn             { padding: 12px 10px; font-size: 12px; }
+
+  /* Feed grid: auto layout with slightly larger cells */
+  .feed-grid.l-auto         { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+}
+
+/* ── xl: ≥768px — tablet portrait ───────────────────────────── */
 @media (min-width: 768px) {
-  .feed-grid.l-auto { grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+  /* Header: more padding, bigger touch targets */
+  .viewer-header            { padding: 10px 16px; gap: 8px; height: 56px; }
+  .viewer-header .icon-btn  { width: 38px; height: 38px; }
+  .header-brand             { font-size: 18px; }
+
+  /* Feed grid: larger minimum cell on tablet */
+  .feed-grid.l-auto         { grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+  .feed-grid                { padding: 10px; gap: 10px; }
+
+  /* Camera bottom bar: more comfortable padding */
+  .cam-bottom-bar           { padding: 16px 32px max(32px, calc(16px + env(safe-area-inset-bottom))); }
+  .cam-ctrl-btn .ctrl-icon  { width: 54px; height: 54px; font-size: 24px; }
+  .cam-ctrl-btn             { padding: 12px 14px; font-size: 12px; }
+
+  /* Panel sheet: slightly wider on tablet */
+  .panel-sheet              { max-width: 560px; max-height: 80vh; }
+
+  /* Setup: wider form, centered comfortably */
+  .setup-form               { max-width: 460px; }
+  .setup-screen             { padding: 40px 32px max(48px, calc(24px + env(safe-area-inset-bottom))); }
+
+  /* Home: bigger logo and title */
+  .home-logo                { width: 84px; height: 84px; border-radius: 22px; }
+  .home-title               { font-size: 36px; }
+  .home-cards               { max-width: 680px; gap: 18px; }
+
+  /* Camera controls per-card: slightly bigger icon btns */
+  .cam-controls .icon-btn   { width: 34px; height: 34px; font-size: 15px; }
+}
+
+/* ── 2xl: ≥1024px — tablet landscape / large tablet ─────────── */
+@media (min-width: 1024px) {
+  .feed-grid.l-auto         { grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); }
+  .feed-grid                { padding: 12px; gap: 12px; }
+
+  .panel-sheet              { max-width: 600px; }
+
+  .home-logo                { width: 96px; height: 96px; }
+  .home-title               { font-size: 40px; }
+  .home-sub                 { font-size: 16px; margin-bottom: 56px; }
+  .home-cards               { max-width: 760px; }
+  .role-card h2             { font-size: 20px; }
+
+  /* Viewer header: even more room */
+  .viewer-header            { padding: 10px 24px; height: 58px; }
+}
+
+/* ── Landscape phone: setup form centering fix ───────────────── */
+@media (max-height: 500px) and (orientation: landscape) {
+  .setup-screen             { justify-content: flex-start; padding-top: 16px; }
+  .setup-title              { display: none; }          /* saves vertical space */
+  .live-screen              { flex-direction: row; }
+  .live-preview-wrap        { flex: 1; }
+  .cam-bottom-bar           { width: 200px; flex-shrink: 0; overflow-y: auto; }
+  .cam-bottom-row           { flex-direction: column; overflow-x: unset; overflow-y: auto; height: 100%; }
+  .cam-ctrl-btn .ctrl-icon  { width: 40px; height: 40px; font-size: 18px; }
 }

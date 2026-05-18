@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
   <title>CamNet – Monitor</title>
   <link rel="manifest" href="/manifest.json">
   <meta name="theme-color" content="#090910">
@@ -31,7 +31,7 @@
 
   <!-- Header -->
   <header class="viewer-header">
-    <a href="/" class="icon-btn" title="Home" style="background:transparent;color:var(--text-dim);font-size:20px;">‹</a>
+    <button class="icon-btn" id="homeBtn" title="Home" style="background:transparent;color:var(--text-dim);font-size:20px;" onclick="if(window.AndroidBridge&&AndroidBridge.goHome)AndroidBridge.goHome();else location.href='/';">‹</button>
     <span class="header-brand">CamNet</span>
     <span class="cam-count-badge" id="camCountBadge">0 cameras</span>
     <div class="header-spacer"></div>
@@ -39,6 +39,7 @@
       <span class="dot connecting" id="wsStatusDot"></span>
       <span id="wsStatusText">Connecting…</span>
     </div>
+    <button class="icon-btn" id="monitorMicBtn" title="Speak to all cameras (monitor mic off)">🎤</button>
     <button class="icon-btn" id="layoutBtn" title="Change layout">⊞</button>
     <button class="icon-btn" id="sessionBtn" title="Session info">🔑</button>
     <button class="icon-btn" id="settingsBtn" title="Settings">⚙</button>
