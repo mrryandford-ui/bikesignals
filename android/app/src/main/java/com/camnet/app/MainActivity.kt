@@ -28,7 +28,13 @@ class MainActivity : AppCompatActivity() {
         setupCrashReporter()
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                if (webView.canGoBack()) webView.goBack() else showHome()
+                val url = webView.url ?: ""
+                when {
+                    // viewer.html loads on localhost — skip the spinner in back-stack and go home
+                    url.startsWith("https://localhost") -> showHome()
+                    webView.canGoBack() -> webView.goBack()
+                    else -> showHome()
+                }
             }
         })
         requestPermissions()

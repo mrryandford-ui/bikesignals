@@ -203,6 +203,8 @@ class AndroidBridge(
                             append("wsport=$wsPort")
                         }
                         activity.runOnUiThread {
+                            // Clear spinner from back-stack so pressing back goes home, not to spinner.
+                            activity.webView.clearHistory()
                             activity.webView.loadUrl(
                                 "https://localhost:$sslPort/viewer.html#$frag"
                             )
