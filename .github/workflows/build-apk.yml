@@ -25,15 +25,15 @@ jobs:
         uses: android-actions/setup-android@v3
 
       - name: Install SDK platform & build tools
-        run: sdkmanager "platforms;android-34" "platforms;android-35" "build-tools;35.0.0"
+        run: sdkmanager "platforms;android-34" "platforms;android-35" "build-tools;35.0.0" "build-tools;36.0.0"
 
-      - name: Install Gradle 8.14.1
+      - name: Install Gradle 9.1.0
         run: |
           mkdir -p /tmp/gradle
-          curl -fSL https://services.gradle.org/distributions/gradle-8.14.1-bin.zip \
+          curl -fSL https://services.gradle.org/distributions/gradle-9.1.0-bin.zip \
             -o /tmp/gradle/gradle.zip
           unzip -q -d /tmp/gradle /tmp/gradle/gradle.zip
-          echo "/tmp/gradle/gradle-8.14.1/bin" >> $GITHUB_PATH
+          echo "/tmp/gradle/gradle-9.1.0/bin" >> $GITHUB_PATH
 
       - name: Restore cached signing keystore
         id: keystore-cache

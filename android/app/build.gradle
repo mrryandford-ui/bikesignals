@@ -66,7 +66,7 @@ dependencies {
 
 // Copy public/ web assets into assets before each build so the embedded
 // server always serves the latest HTML/JS/CSS.
-task copyWebAssets(type: Copy) {
+tasks.register('copyWebAssets', Copy) {
     from '../../public'
     into 'src/main/assets/public'
 }
