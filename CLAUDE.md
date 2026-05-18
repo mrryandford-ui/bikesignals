@@ -86,7 +86,7 @@ CamNet is a peer-to-peer multi-phone LAN security camera app. One phone acts as 
 
 ## Known Issues & Fixes
 
-### Fixed (v1.93 — Kotlin 2.1.21 + Gradle 8.14.1 + AGP 8.9.0 + Ktor 3.1.3 migration + responsive UI)
+### Fixed (v1.93 — Kotlin 2.1.21 + Gradle 8.14.1 + AGP 8.11.0 + Ktor 3.1.3 migration + compileSdk 35 + responsive UI)
 - ✅ **Kotlin 1.9.22 → 2.1.21 (K2 compiler) (android/build.gradle):** K2 is backward-compatible; required to read Kotlin 2.x metadata from newer AndroidX libs (activity-ktx 1.10.1, core-ktx 1.16.0 are compiled with Kotlin 2.x — using them with Kotlin 1.9 causes "incompatible metadata" compile errors).
 - ✅ **Gradle 8.2.1 → 8.14.1 (build-apk.yml):** AGP 8.2.2 tops out at Gradle 8.6; 8.14.1 needed for K2 Gradle plugin improvements.
 - ✅ **AGP 8.2.2 → 8.11.0 (android/build.gradle):** AGP 8.2.2 uses internal Gradle APIs removed in 8.7+. AGP 8.9.0 predates Gradle 8.13 and also fails. AGP 8.11.0 minimum Gradle is 8.13 — the first AGP built and tested against the 8.13–8.14 range. CI sdkmanager step updated to also install `platforms;android-35` and `build-tools;35.0.0`.
@@ -430,11 +430,12 @@ CamNet is a peer-to-peer multi-phone LAN security camera app. One phone acts as 
 
 | Layer | Tech |
 |-------|------|
-| Server | Kotlin (Ktor/CIO) |
-| Android | Kotlin, WebView, AndroidBridge (JavascriptInterface) |
+| Server | Kotlin 2.1.21, Ktor 3.1.3 (CIO engine) |
+| Android | Kotlin 2.1.21, AGP 8.11.0, compileSdk/targetSdk 35, minSdk 29 |
+| Build | Gradle 8.14.1, Java 17 (Temurin) |
 | Web (Monitor/Camera) | HTML5, Vanilla JS, WebRTC, MediaRecorder |
-| Styling | CSS Grid, flexbox |
-| AI | TensorFlow.js 4.21.0 + COCO-SSD 2.2.3 (lite_mobilenet_v2) |
+| Styling | CSS Grid, flexbox, safe-area-inset, 100dvh |
+| AI | TensorFlow.js 4.22.0 + COCO-SSD 2.2.3 (lite_mobilenet_v2) |
 | Assets | SVG icons, JSON manifests |
 
 ---
@@ -478,7 +479,7 @@ CamNet is a peer-to-peer multi-phone LAN security camera app. One phone acts as 
 
 ### CI / GitHub Actions (`build-apk.yml`)
 Every push to `main` or `claude/*` branches triggers a build:
-1. Java 17 (Temurin) + Android SDK 34 + Gradle 8.2.1 installed
+1. Java 17 (Temurin) + Android SDK 34 + 35 + Gradle 8.14.1 installed
 2. Signing keystore (`camnet-debug.jks`) restored from Actions cache (generated once, reused so APK updates install without uninstalling)
 3. `BUILD_NUMBER` env var set to `github.run_number`; `build.gradle` reads it via `System.getenv("BUILD_NUMBER")` — no `sed` manipulation needed
 4. `gradle assembleDebug --no-daemon` builds the APK
@@ -619,4 +620,4 @@ camnet/
 
 ---
 
-**Last Updated:** May 2026 (v1.93 — responsive UI, Kotlin 2.1.21 + Gradle 8.14.1 + AGP 8.9.0 + Ktor 3.1.3 migration)
+**Last Updated:** May 2026 (v1.93 — Kotlin 2.1.21 / Gradle 8.14.1 / AGP 8.11.0 / Ktor 3.1.3 / compileSdk 35 migration complete + responsive UI overhaul)
