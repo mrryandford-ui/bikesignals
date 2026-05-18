@@ -86,6 +86,32 @@ CamNet is a peer-to-peer multi-phone LAN security camera app. One phone acts as 
 
 ## Known Issues & Fixes
 
+### Fixed (v1.93 — Kotlin 2.1.21 + Gradle 8.14.1 + AGP 8.9.0 + Ktor 3.1.3 migration + responsive UI)
+- ✅ **Kotlin 1.9.22 → 2.1.21 (K2 compiler) (android/build.gradle):** K2 is backward-compatible; required to read Kotlin 2.x metadata from newer AndroidX libs (activity-ktx 1.10.1, core-ktx 1.16.0 are compiled with Kotlin 2.x — using them with Kotlin 1.9 causes "incompatible metadata" compile errors).
+- ✅ **Gradle 8.2.1 → 8.14.1 (build-apk.yml):** AGP 8.2.2 tops out at Gradle 8.6; 8.14.1 needed for K2 Gradle plugin improvements.
+- ✅ **AGP 8.2.2 → 8.9.0 (android/build.gradle):** AGP 8.2.2 uses internal Gradle APIs removed in 8.7+. AGP 8.9.0 minimum Gradle is 8.11.1 — fully compatible with 8.14.1. CI sdkmanager step updated to also install `platforms;android-35` and `build-tools;35.0.0`.
+- ✅ **Ktor 2.3.7 → 3.1.3 (app/build.gradle + CamNetServer.kt):** Fixes CVE-2025-29904 HTTP request smuggling. Breaking API: `java.time.Duration` → `kotlin.time.Duration.Companion.seconds` for `pingPeriod`/`timeout` in `install(WebSockets)`. All other CamNetServer.kt API (embeddedServer, routing, webSocket, DefaultWebSocketSession) is stable across 2.x→3.x.
+- ✅ **AndroidX bumps (app/build.gradle):** appcompat 1.6.1→1.7.1, core-ktx 1.12.0→1.16.0, activity-ktx 1.8.2→1.10.1.
+
+### Fixed (v1.93 — responsive UI overhaul + in-app navigation fix)
+- ✅ **Responsive layout: small phone to large tablet (app.css + all HTML files):**
+  - `viewport-fit=cover` added to viewport meta in `index.html`, `viewer.html`, `camera.html` — required for `env(safe-area-inset-bottom)` to report correctly on notched/gesture-bar devices.
+  - `100dvh` added alongside `100vh` fallback in `.viewer-app`, `.camera-app`, `.home-page` — fixes layout when mobile browser chrome collapses/expands.
+  - `.room-code` `min-width: 220px` removed — was overflowing 320px screens. Font replaced with `clamp(26px, 8vw, 38px)` and letter-spacing with `clamp(3px, 1.2vw, 6px)`.
+  - `.cam-bottom-bar` and `.setup-screen` bottom padding use `max(Npx, calc(12px + env(safe-area-inset-bottom)))` — clears gesture indicator on iPhone/Android.
+  - `.panel-sheet` bottom padding uses `max(40px, calc(20px + env(safe-area-inset-bottom)))`; added `overscroll-behavior: contain`.
+  - `.setup-screen` gains `overflow-y: auto` and `overscroll-behavior: contain` so the form stays reachable when the keyboard opens on short phones.
+  - **xs ≤374px:** viewer header icon buttons shrink to 30px; ws status text hidden (dot retained); cam count badge hidden; seg-ctrl rows wrap (label above, control full-width); seg-btn font/padding reduced; camera live control icons 38px; l-2 grid collapses to 1 col.
+  - **sm ≤479px:** session actions stack vertically; live status bar tighter; home page padding reduced.
+  - **lg ≥600px:** panel sheets capped at 520px and horizontally centered (`.panel { justify-content: center }`); home role cards go side-by-side; feed grid uses 260px minimum cell.
+  - **xl ≥768px:** viewer header 56px tall; camera live controls 54px icons; feed grid 300px minimum cell; setup form wider; panel sheet capped at 560px.
+  - **2xl ≥1024px:** feed grid 360px min cells; home logo/title scale up; panel sheet capped at 600px.
+  - **Landscape phone (height ≤500px):** setup title hidden to save vertical space; live screen rotates to row layout with controls in a vertical sidebar.
+  - Service worker cache bumped `camnet-v10` → `camnet-v11` to force immediate asset refresh.
+- ✅ **Back button from Monitor viewer lands on wrong home screen (viewer.html):**
+  - Root cause: `<a href="/">‹</a>` navigated the WebView to the Ktor server root, which served `public/index.html` — a static file with no version info or native home screen content. The Kotlin-generated `homeHtml()` (which has version, copyright, update button) was never shown.
+  - Fix: Replaced anchor with `<button id="homeBtn">` that calls `AndroidBridge.goHome()` when running inside the app (triggers the native `showHome()` → `homeHtml()`); falls back to `location.href='/'` in a browser context.
+
 ### Fixed (post-v1.92 — back navigation + CI hardening)
 - ✅ **Back from Monitor viewer lands on spinner, not home (MainActivity.kt + AndroidBridge.kt):**
   - Root cause: `startMonitor()` loads a "Starting server…" spinner page before `loadUrl(viewer.html)`. WebView history was `[home → spinner → viewer.html]`; `canGoBack()` returned true so pressing back surfaced the spinner, not home.
@@ -591,4 +617,4 @@ camnet/
 
 ---
 
-**Last Updated:** May 2026 (v1.92 + post-release fixes — two-way audio, DVR rolling buffer, polygon motion zones, back-navigation fix, CI hardening)
+**Last Updated:** May 2026 (v1.93 — responsive UI, Kotlin 2.1.21 + Gradle 8.14.1 + AGP 8.9.0 + Ktor 3.1.3 migration)
