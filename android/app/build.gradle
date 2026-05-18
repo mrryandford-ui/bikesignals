@@ -96,6 +96,8 @@ def extractSslCert = tasks.register('extractSslCert') {
 }
 
 afterEvaluate {
-    preBuild.dependsOn copyWebAssets
-    preBuild.dependsOn extractSslCert
+    tasks.named('preBuild').configure {
+        dependsOn copyWebAssets
+        dependsOn extractSslCert
+    }
 }
