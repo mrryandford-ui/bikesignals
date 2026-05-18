@@ -27,13 +27,13 @@ jobs:
       - name: Install SDK platform & build tools
         run: sdkmanager "platforms;android-34" "build-tools;34.0.0"
 
-      - name: Install Gradle 8.2.1
+      - name: Install Gradle 8.14.1
         run: |
           mkdir -p /tmp/gradle
-          curl -fSL https://services.gradle.org/distributions/gradle-8.2.1-bin.zip \
+          curl -fSL https://services.gradle.org/distributions/gradle-8.14.1-bin.zip \
             -o /tmp/gradle/gradle.zip
           unzip -q -d /tmp/gradle /tmp/gradle/gradle.zip
-          echo "/tmp/gradle/gradle-8.2.1/bin" >> $GITHUB_PATH
+          echo "/tmp/gradle/gradle-8.14.1/bin" >> $GITHUB_PATH
 
       - name: Restore cached signing keystore
         id: keystore-cache

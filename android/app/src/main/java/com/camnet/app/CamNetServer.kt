@@ -23,7 +23,7 @@ import java.net.Inet4Address
 import java.net.NetworkInterface
 import java.net.URLConnection
 import java.security.KeyStore
-import java.time.Duration
+import kotlin.time.Duration.Companion.seconds
 import java.util.Timer
 import java.util.TimerTask
 import java.util.UUID
@@ -83,8 +83,8 @@ class CamNetServer(port: Int, private val assets: AssetManager, private val cont
 
     private val engine = embeddedServer(CIO, port = port) {
         install(WebSockets) {
-            pingPeriod = Duration.ofSeconds(15)
-            timeout    = Duration.ofSeconds(60)
+            pingPeriod = 15.seconds
+            timeout    = 60.seconds
         }
         routing {
             webSocket("/")         {
