@@ -162,38 +162,44 @@ class MainActivity : AppCompatActivity() {
         android.widget.Toast.makeText(this, "Downloading CamNet v${version}…", android.widget.Toast.LENGTH_SHORT).show()
         Thread {
             try {
-                val destFile = java.io.File(
-                    getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS),
-                    "CamNet-v${version}.apk"
-                )
+                android.util.Log.i("CamNet", "downloadAndInstall: start url=$apkUrl")
                 val request = android.app.DownloadManager.Request(android.net.Uri.parse(apkUrl)).apply {
                     setTitle("CamNet v${version}")
                     setDescription("Downloading update…")
                     setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                    setDestinationUri(android.net.Uri.fromFile(destFile))
-                    setMimeType("application/vnd.android.package-archive")
+                    setDestinationInExternalFilesDir(
+                        this@MainActivity,
+                        android.os.Environment.DIRECTORY_DOWNLOADS,
+                        "CamNet-v${version}.apk"
+                    )
+                    // NOTE: do NOT call setMimeType("application/vnd.android.package-archive") on Android 14+.
                 }
                 val dm = getSystemService(DOWNLOAD_SERVICE) as android.app.DownloadManager
                 val downloadId = dm.enqueue(request)
+                android.util.Log.i("CamNet", "downloadAndInstall: enqueued id=$downloadId")
                 val query = android.app.DownloadManager.Query().setFilterById(downloadId)
                 var downloading = true
                 while (downloading) {
                     Thread.sleep(1_000)
                     val cursor = dm.query(query)
                     if (cursor.moveToFirst()) {
-                        when (cursor.getInt(cursor.getColumnIndexOrThrow(android.app.DownloadManager.COLUMN_STATUS))) {
+                        val status = cursor.getInt(cursor.getColumnIndexOrThrow(android.app.DownloadManager.COLUMN_STATUS))
+                        when (status) {
                             android.app.DownloadManager.STATUS_SUCCESSFUL -> {
                                 downloading = false; runOnUiThread { promptInstall(version) }
                             }
                             android.app.DownloadManager.STATUS_FAILED -> {
                                 downloading = false
-                                runOnUiThread { android.widget.Toast.makeText(this, "Download failed — check your connection", android.widget.Toast.LENGTH_LONG).show() }
+                                val reason = cursor.getInt(cursor.getColumnIndexOrThrow(android.app.DownloadManager.COLUMN_REASON))
+                                android.util.Log.e("CamNet", "downloadAndInstall: failed reason=$reason")
+                                runOnUiThread { android.widget.Toast.makeText(this, "Download failed (reason $reason)", android.widget.Toast.LENGTH_LONG).show() }
                             }
                         }
                     }
                     cursor.close()
                 }
             } catch (e: Exception) {
+                android.util.Log.e("CamNet", "downloadAndInstall exception", e)
                 runOnUiThread { android.widget.Toast.makeText(this, "Update failed: ${e.message}", android.widget.Toast.LENGTH_LONG).show() }
             }
         }.start()
@@ -209,6 +215,19 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread { android.widget.Toast.makeText(this, "APK download incomplete — try again", android.widget.Toast.LENGTH_LONG).show() }
             return
         }
+
+        if (!packageManager.canRequestPackageInstalls()) {
+            android.util.Log.w("CamNet", "promptInstall: REQUEST_INSTALL_PACKAGES not granted — redirecting to settings")
+            runOnUiThread {
+                startActivity(Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                    android.net.Uri.parse("package:$packageName")))
+                android.widget.Toast.makeText(this,
+                    "Allow CamNet to install apps in Settings, then tap Update again",
+                    android.widget.Toast.LENGTH_LONG).show()
+            }
+            return
+        }
+
         val uri = androidx.core.content.FileProvider.getUriForFile(this, "${packageName}.provider", file)
         val intent = Intent(Intent.ACTION_VIEW).apply {
             setDataAndType(uri, "application/vnd.android.package-archive")
