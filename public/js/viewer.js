@@ -160,7 +160,7 @@ async function loadCocoModel() {
     updateSmartStatus('Loading TensorFlow…');
     if (!window.tf) {
       // integrity hash: run `openssl dgst -sha384 -binary tf.min.js | openssl base64 -A` to compute
-      await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.21.0/dist/tf.min.js',
+      await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js',
         { crossOrigin: 'anonymous' });
     }
     updateSmartStatus('Loading detection model…');
