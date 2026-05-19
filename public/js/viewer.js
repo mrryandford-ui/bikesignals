@@ -32,6 +32,9 @@ let photoQuality = '720'; // '480' | '720' | '1080' | 'source'
 let alertSound    = true;
 let alertVibration = true;
 let alertCooldown  = 30; // seconds — must be declared before lsLoad rehydration at boot
+let motionAutoSnap       = false; // declared here to avoid TDZ — lsLoad assigns at boot (line ~130)
+let motionFlash          = false;
+let motionFlashStillMins = 2;
 
 // ── Rough JPEG + video size tables for picker estimates ────────
 // Values are byte/bit averages — JPEG size varies a lot with scene content.
@@ -1205,9 +1208,7 @@ function openDvrPlayback(cameraId) {
 
 // ── Motion detection ───────────────────────────────────────────
 let motionNotifEnabled  = false;
-let motionAutoSnap       = false;
-let motionFlash          = false;
-let motionFlashStillMins = 2;
+// motionAutoSnap, motionFlash, motionFlashStillMins declared at top of file (TDZ fix)
 
 // ── Point-in-polygon (ray casting) ────────────────────────────
 // px, py and all point coords are normalized 0-1.

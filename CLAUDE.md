@@ -102,6 +102,9 @@ CamNet is a peer-to-peer multi-phone LAN security camera app. One phone acts as 
 
 ## Known Issues & Fixes
 
+### Fixed (v1.118 — JS TDZ crash: motionAutoSnap/Flash/StillMins used before declaration)
+- ✅ **`motionAutoSnap`, `motionFlash`, `motionFlashStillMins` used before initialization — JS crashes on load (viewer.js):** `let motionAutoSnap/motionFlash/motionFlashStillMins` were declared inside the `// ── Motion detection ──` block at line ~1208, but `lsLoad()` assignments for all three ran at line ~130 (temporal dead zone). Same bug pattern as v1.86 (`alertSound/alertVibration/alertCooldown`). Fix: moved all three declarations to the top-of-file settings block (lines 35-37), alongside the other `let` settings variables, before any code runs. Duplicate stubs at the old location replaced with a single comment `// motionAutoSnap, motionFlash, motionFlashStillMins declared at top of file (TDZ fix)`.
+
 ### Fixed (v1.96 — Solo Mode)
 - ✅ **Solo Mode: standalone single-phone security camera (no network required):**
   - `public/solo.html` + `public/js/solo.js`: Self-contained mode, loaded from assets via `file://` base URL (no Ktor server needed).
@@ -114,10 +117,10 @@ CamNet is a peer-to-peer multi-phone LAN security camera app. One phone acts as 
   - `AndroidBridge.startSolo()`: loads solo.html from assets, starts StreamingService foreground service (camera + wake lock). `AndroidBridge.sendWebhookNotification()`: ntfy/webhook HTTP POST, background thread.
   - Home screen: "🎯 Solo Mode" button (purple, `#7c3aed` border). Back handler extended to treat `file://`/`data:` URLs as home-navigable. `VIBRATE` permission added to manifest.
 
-### Fixed (v1.95 — Gradle 9.1.0 → 9.5.1 patch bump)
+### Fixed (v1.115 — Gradle 9.1.0 → 9.5.1 patch bump)
 - ✅ **Gradle 9.1.0 → 9.5.1 (build-apk.yml):** Current stable Gradle 9.x. AGP 9.0.1 supported through Gradle 9.5.x per Gradle compatibility matrix (tested through AGP 9.2.0-alpha05). 9.5.1 adds task provenance to error messages — failure messages now include "registered by plugin X" so failed task sources are traceable. Also includes automatic Wrapper download retry and numerous R8 and config-cache fixes vs 9.1.0. CI-only change; no Gradle build script changes required.
 
-### Fixed (v1.94 — AGP 9.0.1 + Gradle 9.1.0 migration)
+### Fixed (v1.113 — AGP 9.0.1 + Gradle 9.1.0 migration)
 - ✅ **AGP 8.11.0 → 9.0.1 (android/build.gradle):** Major version upgrade. AGP 9.0 requires Gradle 9.1.0 minimum and build-tools 36.0.0. AGP 8.9.0 and 8.11.0 were tried first but both fail with Gradle 8.14.1 due to internal Gradle API removals in 8.7+ and 8.13+ respectively; the correct fix was upgrading both AGP and Gradle together.
 - ✅ **Gradle 8.14.1 → 9.1.0 (build-apk.yml):** Minimum required for AGP 9.0.1.
 - ✅ **build-tools 36.0.0 added to CI (build-apk.yml):** AGP 9.0 requires build-tools 36.0.0 for D8/R8/aapt2.
@@ -661,4 +664,4 @@ camnet/
 
 ---
 
-**Last Updated:** May 2026 (v1.96 — Solo Mode: standalone single-phone motion detection + recording)
+**Last Updated:** May 2026 (v1.118 — JS TDZ fix: motionAutoSnap/Flash/StillMins hoisted to top-of-file; correct prior build labels v1.113/v1.115)
