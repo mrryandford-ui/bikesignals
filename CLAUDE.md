@@ -102,6 +102,19 @@ CamNet is a peer-to-peer multi-phone LAN security camera app. One phone acts as 
 
 ## Known Issues & Fixes
 
+### Fixed (post-v1.118 — S24 camera freeze + Moto G in-app update)
+- ✅ **Camera feed freezes on Samsung S24 Ultra (viewer.js):** Three root causes fixed:
+  - **No stall watchdog:** Added 5s interval in `attachStream` that checks `video.currentTime`. If it hasn't advanced for 3 ticks (~15 s), re-assigns `srcObject` to force decoder restart.
+  - **ICE 'disconnected' not handled:** Samsung radios frequently go to `disconnected` without reaching `failed`, so `restartIce()` never fired. Added 8s delayed restart on `disconnected` state.
+  - **No Monitor keep-alive:** Camera.js has silent audio + MediaSession to prevent Samsung One UI throttling; viewer.js had nothing. Added `startMonitorKeepAlive()` (silent oscillator + `mediaSession.playbackState = 'playing'`) called at boot alongside `connectWS()`.
+  - Stall watchdog cleared in `onCameraLeft` to prevent leaked intervals.
+- ✅ **Moto G in-app update silently fails (MainActivity.kt):**
+  - `setDestinationUri(Uri.fromFile())` throws `SecurityException` on Android 14+ for APK downloads → replaced with `setDestinationInExternalFilesDir()`.
+  - `setMimeType("application/vnd.android.package-archive")` blocked by Android 14+ OEM security policies before `enqueue()` → removed.
+  - Added `Log.e("CamNet", "downloadAndInstall exception", e)` so exceptions always appear in logcat regardless of Toast lifecycle.
+  - Added `canRequestPackageInstalls()` guard in `promptInstall()` with Settings redirect if not granted.
+  - Added `COLUMN_REASON` logging on `STATUS_FAILED` for future diagnostics.
+
 ### Fixed (v1.118 — JS TDZ crash: motionAutoSnap/Flash/StillMins used before declaration)
 - ✅ **`motionAutoSnap`, `motionFlash`, `motionFlashStillMins` used before initialization — JS crashes on load (viewer.js):** `let motionAutoSnap/motionFlash/motionFlashStillMins` were declared inside the `// ── Motion detection ──` block at line ~1208, but `lsLoad()` assignments for all three ran at line ~130 (temporal dead zone). Same bug pattern as v1.86 (`alertSound/alertVibration/alertCooldown`). Fix: moved all three declarations to the top-of-file settings block (lines 35-37), alongside the other `let` settings variables, before any code runs. Duplicate stubs at the old location replaced with a single comment `// motionAutoSnap, motionFlash, motionFlashStillMins declared at top of file (TDZ fix)`.
 
@@ -664,4 +677,4 @@ camnet/
 
 ---
 
-**Last Updated:** May 2026 (v1.118 — JS TDZ fix: motionAutoSnap/Flash/StillMins hoisted to top-of-file; correct prior build labels v1.113/v1.115)
+**Last Updated:** May 2026 (post-v1.118 — S24 camera freeze fixed: stall watchdog + ICE disconnected recovery + Monitor keep-alive; Moto G update fixed: setDestinationInExternalFilesDir + setMimeType removal)

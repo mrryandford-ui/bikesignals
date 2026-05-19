@@ -357,10 +357,19 @@ function onCameraJoined(cameraId, name) {
 
   pc.onconnectionstatechange = () => updateConnState(cameraId, pc.connectionState);
   pc.oniceconnectionstatechange = () => {
-    if (pc.iceConnectionState === 'failed') pc.restartIce();
+    const s = pc.iceConnectionState;
+    if (s === 'failed') {
+      pc.restartIce();
+    } else if (s === 'disconnected') {
+      // Samsung radios often sit in 'disconnected' without reaching 'failed'.
+      // Give 8 s to self-recover, then force an ICE restart.
+      setTimeout(() => {
+        if (pc.iceConnectionState === 'disconnected') pc.restartIce();
+      }, 8_000);
+    }
   };
 
-  peers.set(cameraId, { pc, name, stream: null, recorder: null, motion: null, facingMode: null, torchOn: false, quality: 720, stealth: false, recordTarget: null, recDurationMs: 0, recStartTime: 0, recSegNum: 0, recBaseName: '', recChunks: [], recSegTimer: null, recDurationTimer: null, zone: null, lastMotionAt: 0, motionConsecutive: 0, motionFlashActive: false, motionFlashTimer: null, timelapse: null, audioSendTransceiver: null, dvrSegments: [], dvrRecorder: null, dvrSegTimer: null, dvrEnabled: false });
+  peers.set(cameraId, { pc, name, stream: null, recorder: null, motion: null, facingMode: null, torchOn: false, quality: 720, stealth: false, recordTarget: null, recDurationMs: 0, recStartTime: 0, recSegNum: 0, recBaseName: '', recChunks: [], recSegTimer: null, recDurationTimer: null, zone: null, lastMotionAt: 0, motionConsecutive: 0, motionFlashActive: false, motionFlashTimer: null, timelapse: null, audioSendTransceiver: null, dvrSegments: [], dvrRecorder: null, dvrSegTimer: null, dvrEnabled: false, stallWatchdog: null });
   addCameraCard(cameraId, name);
   updateCamCount();
 }
@@ -368,6 +377,7 @@ function onCameraJoined(cameraId, name) {
 function onCameraLeft(cameraId) {
   const peer = peers.get(cameraId);
   if (peer) {
+    if (peer.stallWatchdog) { clearInterval(peer.stallWatchdog); peer.stallWatchdog = null; }
     stopMotion(cameraId);
     stopRecording(cameraId);
     stopTimelapse(cameraId);
@@ -516,8 +526,13 @@ function syncMuteBtn(cameraId) {
 }
 
 function attachStream(cameraId, stream) {
+  const peer = peers.get(cameraId);
   const video = document.querySelector(`#card-${cameraId} .cam-video`);
-  if (!video) return;
+  if (!video || !peer) return;
+
+  // Clear any previous stall watchdog before re-attaching.
+  if (peer.stallWatchdog) { clearInterval(peer.stallWatchdog); peer.stallWatchdog = null; }
+
   video.srcObject = stream;
   video.muted = muteAll;
   video.play()
@@ -525,6 +540,26 @@ function attachStream(cameraId, stream) {
     .finally(() => syncMuteBtn(cameraId));
   applyMirror(cameraId);
   startMotion(cameraId);
+
+  // Stall watchdog: poll every 5 s; if currentTime hasn't advanced for 3 ticks (~15 s)
+  // the stream is frozen — re-assign srcObject to force the decoder to restart.
+  let lastTime = -1, stallTicks = 0;
+  peer.stallWatchdog = setInterval(() => {
+    if (!peers.has(cameraId)) { clearInterval(peer.stallWatchdog); return; }
+    if (video.readyState < 2 || video.paused) return;
+    if (video.currentTime === lastTime) {
+      if (++stallTicks >= 3) {
+        stallTicks = 0;
+        console.warn('[CamNet] video stall on', cameraId, '— reattaching stream');
+        video.srcObject = null;
+        video.srcObject = peer.stream;
+        video.play().catch(() => {});
+      }
+    } else {
+      stallTicks = 0;
+    }
+    lastTime = video.currentTime;
+  }, 5_000);
   // Sync per-camera notify button state
   const notifyBtn = document.querySelector(`#card-${cameraId} [data-action="notify"]`);
   if (notifyBtn) {
@@ -2565,6 +2600,25 @@ document.getElementById('motionFlashStillRow').style.display = motionFlash ? '' 
 document.getElementById('smartDetectionStatusRow').style.display = smartDetectionEnabled ? '' : 'none';
 document.getElementById('smartClassesRow').style.display        = smartDetectionEnabled ? 'flex' : 'none';
 
+// ── Monitor keep-alive ─────────────────────────────────────────
+// Prevents Samsung One UI from throttling WebView JS/video rendering
+// when the screen dims or the app is briefly backgrounded. Same pattern
+// as camera.js keepAlive() — silent audio + MediaSession playback state.
+function startMonitorKeepAlive() {
+  try {
+    const ctx  = new (window.AudioContext || window.webkitAudioContext)();
+    const osc  = ctx.createOscillator();
+    const gain = ctx.createGain();
+    gain.gain.value = 0.0001;
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+  } catch (_) {}
+  try {
+    if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
+  } catch (_) {}
+}
+
 // ── Boot ───────────────────────────────────────────────────────
 // Android (Kotlin) passes the LAN IP in the URL fragment to avoid
 // Samsung WebView's broken fetch() SSL path with self-signed certs.
@@ -2601,6 +2655,7 @@ document.getElementById('smartClassesRow').style.display        = smartDetection
     window._sslPort = sslPort;
     showIP(fragIP, sslPort);
     connectWS();
+    startMonitorKeepAlive();
   } else {
     // Browser / non-Samsung fallback: use fetch
     fetch('/api/info')
@@ -2620,6 +2675,6 @@ document.getElementById('smartClassesRow').style.display        = smartDetection
         console.error('api/info fetch failed:', err);
         try { window.AndroidBridge?.logDiagnostic?.('api/info failed: ' + err); } catch (_) {}
       })
-      .finally(() => connectWS());
+      .finally(() => { connectWS(); startMonitorKeepAlive(); });
   }
 })();
