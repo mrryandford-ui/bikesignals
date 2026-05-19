@@ -31,8 +31,10 @@ CamNet is a peer-to-peer multi-phone LAN security camera app. One phone acts as 
 | `AndroidBridge.kt` | JavascriptInterface: `saveSnapshot`, `saveVideo`, `startStreaming`, `stopStreaming` |
 | `public/js/viewer.js` | Monitor: WebRTC peer mgmt, motion detection, recording, timelapse, AI detection |
 | `public/js/camera.js` | Camera: media capture, torch, mic, quality, bitrate, stealth mode, recording |
+| `public/js/solo.js` | Solo: standalone motion detection, recording, flash strobe, audio alarm, ntfy push |
 | `public/viewer.html` | Monitor UI (session mgmt, layout, settings, camera cards) |
 | `public/camera.html` | Camera UI (join form, live screen, quality settings) |
+| `public/solo.html` | Solo UI (preview, arm/disarm, flash/alarm/record controls, settings sheet) |
 | `public/index.html` | Home screen with role selection (Monitor/Camera) |
 | `public/css/app.css` | All styling (fullscreen, motion indicator, timelapse picker, etc.) |
 
@@ -60,6 +62,20 @@ CamNet is a peer-to-peer multi-phone LAN security camera app. One phone acts as 
 - ✅ **Two-way audio:** Monitor mic → all connected cameras. 🎤 header button; camera plays via hidden `<audio>`, shows "🎤 MONITOR" badge when active. Uses `sendrecv` transceiver + `replaceTrack`.
 - ✅ **DVR rolling buffer:** Per-camera 24/7 rolling 30-min buffer (1-min segments, 30 max). 📼 button per card; playback modal with segment list (newest first) and video player. Oldest segments auto-purged.
 
+### Solo Mode (Single Phone)
+- ✅ Standalone mode — no Wi-Fi, no Monitor phone, no Ktor server required
+- ✅ Arm/Disarm toggle with status badge and WATCHING indicator
+- ✅ Two-layer motion detection: pixel-diff + optional COCO-SSD AI (same as viewer.js)
+- ✅ Polygon zone editor (ray-cast point-in-polygon, same as viewer.js)
+- ✅ Torch strobe on motion: Off / Steady / Slow 1Hz / Fast 10Hz, auto-off duration
+- ✅ Audio alarm on motion: Off / Beep (880Hz bursts) / Sustained tone (440Hz), Web Audio API, no files
+- ✅ 5-min segment recording to DCIM/CamNet gallery
+- ✅ Record-on-motion with configurable idle-stop window
+- ✅ Push notifications via ntfy.sh (or any webhook) — `AndroidBridge.sendWebhookNotification`
+- ✅ Native Android motion notification via `AndroidBridge.fireMotionAlert`
+- ✅ Camera flip, snapshot, all settings persisted (localStorage `camnet.solo.*`)
+- ✅ Back button → home; StreamingService keeps camera alive
+
 ### Camera (Phone)
 - ✅ Join session with 6-char code or auto-join via QR `?room=XXXX` param
 - ✅ 30-second connection timeout: if no `joined` msg after 30s, returns to setup
@@ -85,6 +101,18 @@ CamNet is a peer-to-peer multi-phone LAN security camera app. One phone acts as 
 ---
 
 ## Known Issues & Fixes
+
+### Fixed (v1.96 — Solo Mode)
+- ✅ **Solo Mode: standalone single-phone security camera (no network required):**
+  - `public/solo.html` + `public/js/solo.js`: Self-contained mode, loaded from assets via `file://` base URL (no Ktor server needed).
+  - Two-layer motion detection: pixel-diff on 160×120 canvas (same SENS thresholds, consecutive-frame guard, polygon zone as viewer.js) + optional COCO-SSD AI (same lazy-load pattern, configurable confidence 0.1–0.9, same 8 class checkboxes).
+  - Torch strobe: Off / Steady / Slow (1 Hz, 500ms) / Fast (10 Hz, 50ms) via `track.applyConstraints({advanced:[{torch}]})`. Auto-off after configurable duration (10s/30s/1min/until off).
+  - Web Audio API alarm: Off / Beep (0.5s bursts at 880Hz every 1.5s) / Sustained tone (440Hz sine). No files, works offline.
+  - 5-min segment recording via MediaRecorder on local stream, saved to DCIM/CamNet via `AndroidBridge.saveVideo`. Record-on-motion toggle with configurable idle-stop (30s/1min/5min/never).
+  - Remote push via `AndroidBridge.sendWebhookNotification`: POSTs to ntfy.sh topic URL with Title/Priority headers over HttpURLConnection (background thread). Also fires local `AndroidBridge.fireMotionAlert` Android notification.
+  - Polygon zone editor (same ray-cast point-in-polygon implementation as viewer.js). All settings persisted to localStorage under `camnet.solo.` namespace.
+  - `AndroidBridge.startSolo()`: loads solo.html from assets, starts StreamingService foreground service (camera + wake lock). `AndroidBridge.sendWebhookNotification()`: ntfy/webhook HTTP POST, background thread.
+  - Home screen: "🎯 Solo Mode" button (purple, `#7c3aed` border). Back handler extended to treat `file://`/`data:` URLs as home-navigable. `VIBRATE` permission added to manifest.
 
 ### Fixed (v1.95 — Gradle 9.1.0 → 9.5.1 patch bump)
 - ✅ **Gradle 9.1.0 → 9.5.1 (build-apk.yml):** Current stable Gradle 9.x. AGP 9.0.1 supported through Gradle 9.5.x per Gradle compatibility matrix (tested through AGP 9.2.0-alpha05). 9.5.1 adds task provenance to error messages — failure messages now include "registered by plugin X" so failed task sources are traceable. Also includes automatic Wrapper download retry and numerous R8 and config-cache fixes vs 9.1.0. CI-only change; no Gradle build script changes required.
@@ -633,4 +661,4 @@ camnet/
 
 ---
 
-**Last Updated:** May 2026 (v1.95 — Gradle 9.5.1 patch bump on top of v1.94 AGP 9.0.1 stack)
+**Last Updated:** May 2026 (v1.96 — Solo Mode: standalone single-phone motion detection + recording)
