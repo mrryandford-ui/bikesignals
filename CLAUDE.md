@@ -102,6 +102,9 @@ CamNet is a peer-to-peer multi-phone LAN security camera app. One phone acts as 
 
 ## Known Issues & Fixes
 
+### Fixed (post-v1.118 — ntfy snapshot + home screen polish + relic web index fix)
+- ✅ **ntfy push notifications had no image (solo.js + AndroidBridge.kt):** `sendWebhookNotification` already accepted `imageBase64` and sent it as `image/jpeg` to ntfy (with text in `X-Message` header) — but `solo.js` was passing `''`. Fixed by adding `captureMotionSnap()` helper (320px JPEG from live video, 0.6 quality) shared by both `fireNativeAlert` and the ntfy call. ntfy notifications now always include a low-res snapshot regardless of local recording/snapshot settings, so remote viewers can see what triggered the alert.
+
 ### Fixed (post-v1.118 — home screen polish + relic web index fix)
 - ✅ **Solo Mode button was purple — doesn't match app palette (MainActivity.kt `homeHtml()`):** Changed from `background:#1a1a2e; border:#7c3aed; color:#a78bfa` to `background:transparent; border:1.5px solid #475569; color:#94a3b8` — slate-gray outline, consistent with the rest of the dark theme.
 - ✅ **Hint text missing Solo description (homeHtml()):** Added `Solo: motion detection & recording — no network needed` as a third line in the hint paragraph below the buttons.
@@ -682,4 +685,4 @@ camnet/
 
 ---
 
-**Last Updated:** May 2026 (post-v1.118 — S24 freeze fix, Moto G update fix, home screen polish: Solo gray button, hint text, relic index.html redirect)
+**Last Updated:** May 2026 (post-v1.118 — ntfy snapshots, S24 freeze fix, Moto G update fix, home screen polish)

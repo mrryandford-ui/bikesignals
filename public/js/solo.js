@@ -304,14 +304,15 @@ function onMotionDetected(detectedClass) {
   // Native Android notification
   fireNativeAlert(detectedClass);
 
-  // Remote push (ntfy)
+  // Remote push (ntfy) — always includes a 320px JPEG snapshot regardless
+  // of local recording/snapshot settings so remote viewers can see what triggered.
   const url = ntfyUrl.trim();
   if (url) {
     const label = detectedClass
       ? detectedClass.charAt(0).toUpperCase() + detectedClass.slice(1) + ' detected'
       : 'Motion detected';
-    const body  = label + ' — ' + new Date().toLocaleTimeString();
-    window.AndroidBridge?.sendWebhookNotification?.(url, 'Motion detected — CamNet Solo', body, '');
+    const body = label + ' — ' + new Date().toLocaleTimeString();
+    window.AndroidBridge?.sendWebhookNotification?.(url, 'Motion detected — CamNet Solo', body, captureMotionSnap());
   }
 
   // Flash on motion
@@ -434,13 +435,8 @@ function updateMotionIndicator() {
   else                   text.textContent = 'WATCHING';
 }
 
-// ── Native Android notification ────────────────────────────────
-function fireNativeAlert(detectedClass) {
-  if (!window.AndroidBridge?.fireMotionAlert) return;
-  const name = detectedClass
-    ? detectedClass.charAt(0).toUpperCase() + detectedClass.slice(1) + ' detected'
-    : 'Motion detected';
-  let snap = '';
+// ── Snapshot capture (shared by native alert + ntfy) ───────────
+function captureMotionSnap() {
   try {
     const video = document.getElementById('soloVideo');
     if (video && video.videoWidth > 0) {
@@ -448,10 +444,19 @@ function fireNativeAlert(detectedClass) {
       cvs.width  = 320;
       cvs.height = Math.round(320 * video.videoHeight / video.videoWidth);
       cvs.getContext('2d').drawImage(video, 0, 0, cvs.width, cvs.height);
-      snap = cvs.toDataURL('image/jpeg', 0.6);
+      return cvs.toDataURL('image/jpeg', 0.6);
     }
   } catch (_) {}
-  window.AndroidBridge.fireMotionAlert('CamNet Solo — ' + name, snap, true, true);
+  return '';
+}
+
+// ── Native Android notification ────────────────────────────────
+function fireNativeAlert(detectedClass) {
+  if (!window.AndroidBridge?.fireMotionAlert) return;
+  const name = detectedClass
+    ? detectedClass.charAt(0).toUpperCase() + detectedClass.slice(1) + ' detected'
+    : 'Motion detected';
+  window.AndroidBridge.fireMotionAlert('CamNet Solo — ' + name, captureMotionSnap(), true, true);
 }
 
 // ── Flash / torch ──────────────────────────────────────────────
