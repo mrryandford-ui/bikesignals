@@ -359,7 +359,7 @@ class MainActivity : AppCompatActivity() {
         <button class="btn primary"   onclick="AndroidBridge.startMonitor()">🖥&nbsp; Monitor</button>
         <button class="btn secondary" onclick="AndroidBridge.showCameraSetup()">📷&nbsp; Camera</button>
         <button class="btn secondary" onclick="AndroidBridge.startSolo()"
-          style="background:#1a1a2e;border:1.5px solid #7c3aed;color:#a78bfa;">
+          style="background:transparent;border:1.5px solid #475569;color:#94a3b8;">
           🎯&nbsp; Solo Mode
         </button>
         <button onclick="AndroidBridge.checkForUpdateManual()"
@@ -369,7 +369,7 @@ class MainActivity : AppCompatActivity() {
           ⬆ Check for updates
         </button>
         <hr class="divider">
-        <p class="hint">Monitor: start the server &amp; watch feeds<br>Camera: stream this phone to a Monitor</p>
+        <p class="hint">Monitor: start the server &amp; watch feeds<br>Camera: stream this phone to a Monitor<br>Solo: motion detection &amp; recording — no network needed</p>
         <div class="footer">
           <span class="version">v$versionName</span>
           <span class="copyright">&copy; 2026 ZeroPoint IT &middot; All rights reserved</span>

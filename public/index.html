@@ -52,13 +52,20 @@
   </div>
 
   <script>
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js').catch(() => {});
-    }
-    // If opened with ?room=XXXX, go straight to camera join
-    const params = new URLSearchParams(location.search);
-    if (params.get('room')) {
-      location.href = '/camera.html?room=' + encodeURIComponent(params.get('room'));
+    // If running inside the Android WebView, bounce back to the native
+    // Kotlin home screen immediately. The web index.html is a relic in
+    // the app context — homeHtml() is the real home screen.
+    if (typeof AndroidBridge !== 'undefined') {
+      AndroidBridge.goHome();
+    } else {
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/sw.js').catch(() => {});
+      }
+      // If opened with ?room=XXXX, go straight to camera join
+      const params = new URLSearchParams(location.search);
+      if (params.get('room')) {
+        location.href = '/camera.html?room=' + encodeURIComponent(params.get('room'));
+      }
     }
   </script>
 </body>

@@ -102,6 +102,11 @@ CamNet is a peer-to-peer multi-phone LAN security camera app. One phone acts as 
 
 ## Known Issues & Fixes
 
+### Fixed (post-v1.118 — home screen polish + relic web index fix)
+- ✅ **Solo Mode button was purple — doesn't match app palette (MainActivity.kt `homeHtml()`):** Changed from `background:#1a1a2e; border:#7c3aed; color:#a78bfa` to `background:transparent; border:1.5px solid #475569; color:#94a3b8` — slate-gray outline, consistent with the rest of the dark theme.
+- ✅ **Hint text missing Solo description (homeHtml()):** Added `Solo: motion detection & recording — no network needed` as a third line in the hint paragraph below the buttons.
+- ✅ **"Relic screen" — web `index.html` occasionally shows instead of native home (public/index.html):** Root cause: Ktor still serves `public/index.html` at `/`. If the WebView lands on `https://localhost:3443/` for any reason (edge-case history navigation, a link pointing to `/`), it shows the old web card layout — no version, no Solo, no hint text. Fix: added an `AndroidBridge` check at the top of the script block — if running inside the app, immediately calls `AndroidBridge.goHome()` to return to the Kotlin native home. Browser/PWA users are unaffected (the `else` branch handles service worker and QR room param as before).
+
 ### Fixed (post-v1.118 — S24 camera freeze + Moto G in-app update)
 - ✅ **Camera feed freezes on Samsung S24 Ultra (viewer.js):** Three root causes fixed:
   - **No stall watchdog:** Added 5s interval in `attachStream` that checks `video.currentTime`. If it hasn't advanced for 3 ticks (~15 s), re-assigns `srcObject` to force decoder restart.
@@ -677,4 +682,4 @@ camnet/
 
 ---
 
-**Last Updated:** May 2026 (post-v1.118 — S24 camera freeze fixed: stall watchdog + ICE disconnected recovery + Monitor keep-alive; Moto G update fixed: setDestinationInExternalFilesDir + setMimeType removal)
+**Last Updated:** May 2026 (post-v1.118 — S24 freeze fix, Moto G update fix, home screen polish: Solo gray button, hint text, relic index.html redirect)
