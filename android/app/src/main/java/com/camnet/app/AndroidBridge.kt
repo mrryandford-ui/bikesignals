@@ -239,6 +239,99 @@ class AndroidBridge(
     }
 
     /**
+     * Called from the home screen "Solo" button — loads solo.html directly from
+     * assets (no Ktor server needed; all logic is local JS + camera).
+     */
+    @JavascriptInterface
+    fun startSolo() {
+        val activity = context as? MainActivity ?: return
+        activity.runOnUiThread {
+            try {
+                ContextCompat.startForegroundService(context, Intent(context, StreamingService::class.java))
+            } catch (t: Throwable) {
+                android.util.Log.w("CamNet", "startSolo: startForegroundService failed: $t")
+            }
+            activity.webView.clearHistory()
+            // Load solo.html from assets via loadDataWithBaseURL so relative CSS/JS paths resolve.
+            // Base URL uses file:///android_asset/ so the WebView treats it as local-origin
+            // and grants camera/mic permission requests (same pattern as setupHtml).
+            try {
+                val html = activity.assets.open("public/solo.html").bufferedReader().readText()
+                activity.webView.loadDataWithBaseURL(
+                    "file:///android_asset/public/", html, "text/html", "UTF-8", null
+                )
+            } catch (e: Exception) {
+                android.util.Log.e("CamNet", "startSolo load failed: $e")
+                android.widget.Toast.makeText(context, "Could not load Solo mode: $e", android.widget.Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    /**
+     * POSTs a push notification to a ntfy-compatible topic URL via HttpURLConnection.
+     * Called by solo.js on motion detection and test button.
+     * Runs on a background thread — never blocks the UI.
+     *
+     * Compatible with ntfy.sh, self-hosted ntfy, and any webhook that accepts a POST
+     * with Title / Priority / Message headers (or a raw body).
+     *
+     * @param topicUrl   Full URL of the ntfy topic (e.g. https://ntfy.sh/my-topic)
+     * @param title      Notification title (X-Title header)
+     * @param body       Notification body (request body text)
+     * @param imageBase64 Optional JPEG base64 data URL for a thumbnail attachment; pass "" to skip
+     */
+    @JavascriptInterface
+    fun sendWebhookNotification(topicUrl: String, title: String, body: String, imageBase64: String) {
+        kotlin.concurrent.thread(isDaemon = true, name = "camnet-ntfy") {
+            try {
+                val url  = java.net.URL(topicUrl.trim())
+                val conn = url.openConnection() as java.net.HttpURLConnection
+                conn.requestMethod    = "POST"
+                conn.doOutput         = true
+                conn.connectTimeout   = 8_000
+                conn.readTimeout      = 8_000
+                conn.setRequestProperty("Title",    title)
+                conn.setRequestProperty("Priority", "high")
+                conn.setRequestProperty("Content-Type", "text/plain; charset=utf-8")
+
+                // Attach JPEG thumbnail as ntfy attachment if provided
+                if (imageBase64.isNotEmpty()) {
+                    try {
+                        val bytes = android.util.Base64.decode(
+                            imageBase64.substringAfter(","), android.util.Base64.DEFAULT
+                        )
+                        conn.setRequestProperty("Filename", "motion.jpg")
+                        // ntfy: POST with binary body for attachment; body text goes in X-Message header
+                        conn.setRequestProperty("X-Message", body)
+                        conn.setRequestProperty("Content-Type", "image/jpeg")
+                        conn.outputStream.use { it.write(bytes) }
+                    } catch (_: Exception) {
+                        // Attachment failed — fall through to plain text post
+                        conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+                    }
+                } else {
+                    conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+                }
+
+                val code = conn.responseCode
+                android.util.Log.i("CamNet", "ntfy POST $topicUrl → HTTP $code")
+                conn.disconnect()
+
+                if (code !in 200..299) {
+                    (context as? MainActivity)?.runOnUiThread {
+                        android.widget.Toast.makeText(context, "Notification failed (HTTP $code)", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("CamNet", "sendWebhookNotification failed: $e")
+                (context as? MainActivity)?.runOnUiThread {
+                    android.widget.Toast.makeText(context, "Notification error: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    /**
      * Called from viewer.js when motion is detected. Fires a high-priority Android
      * notification visible on lock screen / when app is backgrounded, with optional
      * snapshot thumbnail. Each camera gets its own notification slot keyed by name.

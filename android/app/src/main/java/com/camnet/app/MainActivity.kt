@@ -30,8 +30,10 @@ class MainActivity : AppCompatActivity() {
             override fun handleOnBackPressed() {
                 val url = webView.url ?: ""
                 when {
-                    // viewer.html loads on localhost — skip the spinner in back-stack and go home
+                    // viewer.html loads on localhost — skip spinner in back-stack, go home
                     url.startsWith("https://localhost") -> showHome()
+                    // solo.html loads via file:// or data: — go home directly
+                    url.startsWith("file://") || url.startsWith("data:") -> showHome()
                     webView.canGoBack() -> webView.goBack()
                     else -> showHome()
                 }
@@ -162,38 +164,48 @@ class MainActivity : AppCompatActivity() {
         android.widget.Toast.makeText(this, "Downloading CamNet v${version}…", android.widget.Toast.LENGTH_SHORT).show()
         Thread {
             try {
-                val destFile = java.io.File(
-                    getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS),
-                    "CamNet-v${version}.apk"
-                )
+                android.util.Log.i("CamNet", "downloadAndInstall: start url=$apkUrl")
+                // setDestinationInExternalFilesDir is the correct modern API for app-specific
+                // external storage on Android 10+. setDestinationUri(Uri.fromFile()) throws
+                // SecurityException or silently fails on Android 14+ with APK MIME types.
                 val request = android.app.DownloadManager.Request(android.net.Uri.parse(apkUrl)).apply {
                     setTitle("CamNet v${version}")
                     setDescription("Downloading update…")
                     setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                    setDestinationUri(android.net.Uri.fromFile(destFile))
-                    setMimeType("application/vnd.android.package-archive")
+                    setDestinationInExternalFilesDir(
+                        this@MainActivity,
+                        android.os.Environment.DIRECTORY_DOWNLOADS,
+                        "CamNet-v${version}.apk"
+                    )
+                    // setMimeType("application/vnd.android.package-archive") removed:
+                    // Android 14+ blocks APK MIME downloads before enqueue on some OEMs.
                 }
                 val dm = getSystemService(DOWNLOAD_SERVICE) as android.app.DownloadManager
                 val downloadId = dm.enqueue(request)
+                android.util.Log.i("CamNet", "downloadAndInstall: enqueued id=$downloadId")
                 val query = android.app.DownloadManager.Query().setFilterById(downloadId)
                 var downloading = true
                 while (downloading) {
                     Thread.sleep(1_000)
                     val cursor = dm.query(query)
                     if (cursor.moveToFirst()) {
-                        when (cursor.getInt(cursor.getColumnIndexOrThrow(android.app.DownloadManager.COLUMN_STATUS))) {
+                        val status = cursor.getInt(cursor.getColumnIndexOrThrow(android.app.DownloadManager.COLUMN_STATUS))
+                        when (status) {
                             android.app.DownloadManager.STATUS_SUCCESSFUL -> {
                                 downloading = false; runOnUiThread { promptInstall(version) }
                             }
                             android.app.DownloadManager.STATUS_FAILED -> {
                                 downloading = false
-                                runOnUiThread { android.widget.Toast.makeText(this, "Download failed — check your connection", android.widget.Toast.LENGTH_LONG).show() }
+                                val reason = cursor.getInt(cursor.getColumnIndexOrThrow(android.app.DownloadManager.COLUMN_REASON))
+                                android.util.Log.e("CamNet", "downloadAndInstall: failed reason=$reason")
+                                runOnUiThread { android.widget.Toast.makeText(this, "Download failed (reason $reason)", android.widget.Toast.LENGTH_LONG).show() }
                             }
                         }
                     }
                     cursor.close()
                 }
             } catch (e: Exception) {
+                android.util.Log.e("CamNet", "downloadAndInstall exception", e)
                 runOnUiThread { android.widget.Toast.makeText(this, "Update failed: ${e.message}", android.widget.Toast.LENGTH_LONG).show() }
             }
         }.start()
@@ -207,6 +219,17 @@ class MainActivity : AppCompatActivity() {
         android.util.Log.i("CamNet", "Install file: ${file.path} exists=${file.exists()} size=${file.length()}")
         if (!file.exists() || file.length() == 0L) {
             runOnUiThread { android.widget.Toast.makeText(this, "APK download incomplete — try again", android.widget.Toast.LENGTH_LONG).show() }
+            return
+        }
+        if (!packageManager.canRequestPackageInstalls()) {
+            android.util.Log.w("CamNet", "promptInstall: REQUEST_INSTALL_PACKAGES not granted — redirecting to settings")
+            runOnUiThread {
+                startActivity(Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                    android.net.Uri.parse("package:$packageName")))
+                android.widget.Toast.makeText(this,
+                    "Allow CamNet to install apps in Settings, then tap Update again",
+                    android.widget.Toast.LENGTH_LONG).show()
+            }
             return
         }
         val uri = androidx.core.content.FileProvider.getUriForFile(this, "${packageName}.provider", file)
@@ -335,6 +358,10 @@ class MainActivity : AppCompatActivity() {
         <p class="tagline">Multi-phone security camera</p>
         <button class="btn primary"   onclick="AndroidBridge.startMonitor()">🖥&nbsp; Monitor</button>
         <button class="btn secondary" onclick="AndroidBridge.showCameraSetup()">📷&nbsp; Camera</button>
+        <button class="btn secondary" onclick="AndroidBridge.startSolo()"
+          style="background:#1a1a2e;border:1.5px solid #7c3aed;color:#a78bfa;">
+          🎯&nbsp; Solo Mode
+        </button>
         <button onclick="AndroidBridge.checkForUpdateManual()"
           style="background:transparent;border:1.5px solid #1e293b;color:#64748b;
                  font-size:13px;padding:10px;width:100%;border-radius:12px;
