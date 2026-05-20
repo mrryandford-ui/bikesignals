@@ -2784,9 +2784,12 @@ document.getElementById('soloAdminBtn').addEventListener('click', () => {
 });
 
 document.getElementById('soloAdminAddBtn').addEventListener('click', () => {
-  const url  = document.getElementById('soloAdminUrl').value.trim();
+  let raw  = document.getElementById('soloAdminUrl').value.trim();
+  // Auto-prepend https://ntfy.sh/ if user just typed a topic name
+  if (raw && !raw.startsWith('http')) raw = 'https://ntfy.sh/' + raw;
+  const url  = raw;
   const name = document.getElementById('soloAdminName').value.trim() || 'Solo Device';
-  if (!url || !url.startsWith('http')) { showToast('Enter a valid ntfy topic URL'); return; }
+  if (!url || !url.startsWith('http')) { showToast('Enter a ntfy topic name or full URL'); return; }
   const id = Math.random().toString(36).slice(2, 9);
   soloDevices.push({ id, name, ntfyUrl: url, lastHb: null, armed: false, motionCount: 0, lastAlertAt: 0 });
   lsSaveSoloDevices();
