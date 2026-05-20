@@ -94,6 +94,7 @@ let motionFlashMode = lsLoad('motionFlashMode', 'off');
 let motionFlashDur  = lsLoad('motionFlashDur',   30);
 alarmMode          = lsLoad('alarmMode',    'off');
 recordOnMotion     = lsLoad('recordOnMotion', false);
+let motionCaptureMode  = lsLoad('motionCaptureMode', 'none'); // 'none'|'photo'|'video'|'both'
 let recordIdleSecs = lsLoad('recordIdleSecs', 60);
 let ntfyUrl        = lsLoad('ntfyUrl',      '');
 
@@ -284,8 +285,7 @@ function analyzeFrame() {
       motionConsec = 0;
       if (smartEnabled && soloCocoModel && !pendingSmartDetect &&
           now >= lastSmartAt + SMART_COOLDOWN_MS) {
-        // AI mode: run inference, use class label when confident, fall back to
-        // basic alert when AI draws a blank — AI labels rather than gates.
+        // AI filter mode: only fire alert when a target class is confidently detected.
         lastSmartAt        = now;
         pendingSmartDetect = true;
         runSmartDetect(video).then(matches => {
@@ -293,15 +293,14 @@ function analyzeFrame() {
           if (matches && matches.length > 0) {
             const best = matches.reduce((a, b) => a.score > b.score ? a : b);
             onMotionDetected(best.class);
-          } else {
-            // AI found nothing recognized — still alert so motion isn't silently dropped.
-            onMotionDetected(null);
           }
+          // No match → suppress. AI is a gate, not a labeler.
         });
-      } else if (!smartEnabled || !soloCocoModel || pendingSmartDetect) {
-        // AI off, model not loaded yet, or previous inference still running → basic alert.
+      } else if (!smartEnabled || !soloCocoModel) {
+        // AI off or model not loaded → basic motion alert.
         onMotionDetected(null);
       }
+      // pendingSmartDetect=true → previous inference running, drop this tick.
     }
   }
 
@@ -320,8 +319,8 @@ function onMotionDetected(detectedClass) {
   // Native Android notification
   fireNativeAlert(detectedClass);
 
-  // Remote push (ntfy) — always includes a 320px JPEG snapshot regardless
-  // of local recording/snapshot settings so remote viewers can see what triggered.
+  // Remote push (ntfy) — snapshot attached when available.
+  // AndroidBridge falls back to text-only if image upload fails (e.g. ntfy free tier).
   const url = ntfyUrl.trim();
   if (url) {
     const label = detectedClass
@@ -331,17 +330,20 @@ function onMotionDetected(detectedClass) {
     window.AndroidBridge?.sendWebhookNotification?.(url, 'Motion detected — CamNet Solo', body, captureMotionSnap());
   }
 
+  // Motion-triggered local capture (photo / video / both per settings)
+  if (motionCaptureMode === 'photo' || motionCaptureMode === 'both') takeSnapshot();
+  if ((motionCaptureMode === 'video' || motionCaptureMode === 'both') && !recordActive) {
+    startRecording();
+    clearTimeout(recordIdleTimer); recordIdleTimer = null;
+  }
+
   // Flash on motion
   if (motionFlashMode !== 'off') triggerMotionFlash();
 
   // Audio alarm
   if (alarmMode !== 'off') triggerAlarm();
 
-  // Record on motion
-  if (recordOnMotion && !recordActive) {
-    startRecording();
-    clearTimeout(recordIdleTimer); recordIdleTimer = null;
-  }
+  // (motion-triggered capture handled above)
   if (recordOnMotion && recordActive && recordIdleSecs > 0) {
     clearTimeout(recordIdleTimer);
     recordIdleTimer = setTimeout(() => {
@@ -543,6 +545,12 @@ function stopFlash() {
 }
 
 async function setTorch(on) {
+  // Prefer native AndroidBridge torch (CameraManager) — more reliable than
+  // WebView track.applyConstraints on MediaTek/Samsung devices.
+  if (window.AndroidBridge?.setTorch) {
+    try { window.AndroidBridge.setTorch(on); flashTorchOn = on; return; } catch {}
+  }
+  // WebView fallback
   const track = localStream?.getVideoTracks()[0];
   if (!track) return;
   try {
@@ -722,7 +730,7 @@ function executeSoloCommand(cmd) {
 function startRemoteAdmin() {
   if (hbInterval) return;
   sendSoloHeartbeat();                              // immediate on arm
-  hbInterval    = setInterval(sendSoloHeartbeat,    60_000);
+  hbInterval    = setInterval(sendSoloHeartbeat,   120_000);  // 30/hr — well under ntfy free limit
   cmdPollTimer  = setInterval(pollSoloCommands,     10_000);
 }
 
@@ -1073,7 +1081,10 @@ function syncSettingsPanel() {
   // Alarm mode
   document.querySelectorAll('#soloAlarmModeSeg .seg-btn').forEach(b =>
     b.classList.toggle('active', b.dataset.alarm === alarmMode));
-  // Record on motion
+  // Motion capture format
+  document.querySelectorAll('#soloMotionCaptureSeg .seg-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.capture === motionCaptureMode));
+  // Record on motion (manual)
   document.getElementById('soloRecordOnMotionToggle').classList.toggle('on', recordOnMotion);
   document.getElementById('soloRecordIdleRow').style.display = recordOnMotion ? '' : 'none';
   document.querySelectorAll('#soloRecordIdleSeg .seg-btn').forEach(b =>
@@ -1174,6 +1185,13 @@ document.getElementById('soloRecordOnMotionToggle').addEventListener('click', ()
   lsSave('recordOnMotion', recordOnMotion);
   document.getElementById('soloRecordOnMotionToggle').classList.toggle('on', recordOnMotion);
   document.getElementById('soloRecordIdleRow').style.display = recordOnMotion ? '' : 'none';
+});
+
+document.getElementById('soloMotionCaptureSeg').addEventListener('click', e => {
+  const b = e.target.closest('.seg-btn'); if (!b) return;
+  motionCaptureMode = b.dataset.capture;
+  lsSave('motionCaptureMode', motionCaptureMode);
+  document.querySelectorAll('#soloMotionCaptureSeg .seg-btn').forEach(x => x.classList.toggle('active', x === b));
 });
 
 document.getElementById('soloRecordIdleSeg').addEventListener('click', e => {

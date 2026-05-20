@@ -25,7 +25,8 @@ class AndroidBridge(
         (context as? MainActivity)?.checkForUpdate(manual = true)
     }
 
-    /** Appends a diagnostic message to crash_report.txt and logcat for debugging. */
+    /** Appends a diagnostic message to diagnostics.txt (NOT crash_report.txt) and logcat.
+     *  Writing to crash_report.txt was causing a false "app crashed" dialog on every relaunch. */
     @JavascriptInterface
     fun logDiagnostic(message: String) {
         android.util.Log.d("CamNet", "JS diagnostic: $message")
@@ -33,9 +34,27 @@ class AndroidBridge(
             val entry = "[${java.time.LocalDateTime.now()}] $message\n"
             java.io.File(
                 (context as? MainActivity)?.filesDir ?: return,
-                "crash_report.txt"
+                "diagnostics.txt"
             ).appendText(entry)
         } catch (_: Exception) {}
+    }
+
+    /** Controls the device torch LED via CameraManager — more reliable than
+     *  WebView getUserMedia track.applyConstraints on MediaTek/Samsung devices. */
+    @JavascriptInterface
+    fun setTorch(on: Boolean) {
+        try {
+            val cm = context.getSystemService(android.content.Context.CAMERA_SERVICE)
+                    as android.hardware.camera2.CameraManager
+            val rearId = cm.cameraIdList.firstOrNull { id ->
+                val chars = cm.getCameraCharacteristics(id)
+                chars.get(android.hardware.camera2.CameraCharacteristics.LENS_FACING) ==
+                    android.hardware.camera2.CameraCharacteristics.LENS_FACING_BACK
+            } ?: cm.cameraIdList.firstOrNull() ?: return
+            cm.setTorchMode(rearId, on)
+        } catch (e: Exception) {
+            android.util.Log.w("CamNet", "setTorch($on) failed: $e")
+        }
     }
 
     /** Called from any screen's back/home button to navigate to the home screen. */
@@ -294,31 +313,35 @@ class AndroidBridge(
                 conn.setRequestProperty("Priority", "high")
                 conn.setRequestProperty("Content-Type", "text/plain; charset=utf-8")
 
-                // Attach JPEG thumbnail as ntfy attachment if provided
+                // Try with JPEG attachment; fall back to text-only if rejected (free tier, size limit)
+                var sentWithImage = false
                 if (imageBase64.isNotEmpty()) {
                     try {
                         val bytes = android.util.Base64.decode(
                             imageBase64.substringAfter(","), android.util.Base64.DEFAULT
                         )
                         conn.setRequestProperty("Filename", "motion.jpg")
-                        // ntfy: POST with binary body for attachment; body text goes in X-Message header
                         conn.setRequestProperty("X-Message", body)
                         conn.setRequestProperty("Content-Type", "image/jpeg")
                         conn.outputStream.use { it.write(bytes) }
-                    } catch (_: Exception) {
-                        // Attachment failed — fall through to plain text post
-                        conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
-                    }
-                } else {
+                        sentWithImage = true
+                    } catch (_: Exception) {}
+                }
+                if (!sentWithImage) {
                     conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
                 }
 
                 val code = conn.responseCode
-                android.util.Log.i("CamNet", "ntfy POST $topicUrl → HTTP $code")
+                android.util.Log.i("CamNet", "ntfy POST $topicUrl → HTTP $code (image=$sentWithImage)")
                 conn.disconnect()
 
-                if (code !in 200..299) {
-                    (context as? MainActivity)?.runOnUiThread {
+                when {
+                    code == 429 -> (context as? MainActivity)?.runOnUiThread {
+                        android.widget.Toast.makeText(context,
+                            "ntfy rate limit hit — reduce notification frequency or upgrade plan",
+                            android.widget.Toast.LENGTH_LONG).show()
+                    }
+                    code !in 200..299 -> (context as? MainActivity)?.runOnUiThread {
                         android.widget.Toast.makeText(context, "Notification failed (HTTP $code)", android.widget.Toast.LENGTH_SHORT).show()
                     }
                 }

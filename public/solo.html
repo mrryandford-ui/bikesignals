@@ -445,7 +445,17 @@
     <div class="panel-section-heading">Recording</div>
 
     <div class="panel-row">
-      <span class="panel-label">Record on motion</span>
+      <span class="panel-label">On motion, save</span>
+      <div class="seg-ctrl" id="soloMotionCaptureSeg">
+        <button class="seg-btn active" data-capture="none">Off</button>
+        <button class="seg-btn" data-capture="photo">Photo</button>
+        <button class="seg-btn" data-capture="video">Video</button>
+        <button class="seg-btn" data-capture="both">Both</button>
+      </div>
+    </div>
+
+    <div class="panel-row">
+      <span class="panel-label">Record on motion (manual)</span>
       <button class="toggle" id="soloRecordOnMotionToggle" aria-label="Record on motion"></button>
     </div>
     <div class="panel-row" id="soloRecordIdleRow" style="display:none">
