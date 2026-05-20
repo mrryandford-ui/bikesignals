@@ -139,6 +139,7 @@ async function initMedia() {
     const vid = document.getElementById('soloVideo');
     vid.srcObject = localStream;
     vid.classList.toggle('mirror', facingMode === 'user');
+    vid.play().catch(() => {}); // autoplay attribute alone isn't reliable for srcObject in Android WebView
 
     // Restart motion loop if armed
     if (armed && !motionRunning) startMotionLoop();
