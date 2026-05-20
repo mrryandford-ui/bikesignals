@@ -25,6 +25,9 @@ let monitorMicEnabled   = false;
 
 let globalMotion = false;
 let motionSens = 'mid';
+let motionAutoSnap       = false; // declared here to avoid TDZ — lsLoad assigns at boot (line ~130)
+let motionFlash          = false;
+let motionFlashStillMins = 2;
 let muteAll = false;
 let mirrorFront = true;
 let currentLayout = 'l-auto';
@@ -1205,9 +1208,7 @@ function openDvrPlayback(cameraId) {
 
 // ── Motion detection ───────────────────────────────────────────
 let motionNotifEnabled  = false;
-let motionAutoSnap       = false;
-let motionFlash          = false;
-let motionFlashStillMins = 2;
+// motionAutoSnap, motionFlash, motionFlashStillMins declared at top of file (TDZ fix)
 
 // ── Point-in-polygon (ray casting) ────────────────────────────
 // px, py and all point coords are normalized 0-1.
