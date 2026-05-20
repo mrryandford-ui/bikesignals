@@ -2694,12 +2694,18 @@ function soloCmdUrl(ntfyUrl) { return ntfyUrl.replace(/\/([^\/]+)$/, '/$1-cmd');
 
 async function sendSoloCommand(device, cmd) {
   try {
-    await fetch(soloCmdUrl(device.ntfyUrl), {
+    const r = await fetch(soloCmdUrl(device.ntfyUrl), {
       method: 'POST',
       headers: { 'Title': cmd, 'Priority': 'high', 'Content-Type': 'text/plain' },
       body: cmd,
     });
-    showToast(`Sent "${cmd}" to ${device.name}`);
+    if (r.status === 429) {
+      showToast(`⚠ ntfy rate limit hit — wait a minute or use a fresh topic`);
+    } else if (!r.ok) {
+      showToast(`ntfy rejected command (HTTP ${r.status})`);
+    } else {
+      showToast(`Sent "${cmd}" to ${device.name}`);
+    }
   } catch (e) {
     showToast(`Command failed: ${e.message}`);
   }
