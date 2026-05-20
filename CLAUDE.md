@@ -103,6 +103,8 @@ CamNet is a peer-to-peer multi-phone LAN security camera app. One phone acts as 
 ## Known Issues & Fixes
 
 ### Fixed (post-v1.118 — ntfy snapshot + home screen polish + relic web index fix)
+- ✅ **Solo AI detection silently swallowed motion events (solo.js):** AI mode was a gate — if the model ran and found no recognized class, `onMotionDetected` was never called, `lastAlertAt` never updated, and the cycle repeated silently forever. Fixed: AI is now a labeler — always fires `onMotionDetected(null)` when AI draws a blank, and `onMotionDetected(best.class)` when it identifies something. Also fixed: when a previous AI inference is still pending (`pendingSmartDetect=true`), basic detection fires immediately instead of being silently dropped.
+- ✅ **Solo Mode stealth / incognito (solo.html + solo.js):** 🥷 button in bottom controls bar. Shows full-screen black overlay (`#soloStealthOverlay`, z-index 9999); wake lock acquired on entry. All detection, recording, flash, alarm, and ntfy continue running. Tap 3× within 2 s to exit — same pattern as camera.js stealth mode.
 - ✅ **ntfy push notifications had no image (solo.js + AndroidBridge.kt):** `sendWebhookNotification` already accepted `imageBase64` and sent it as `image/jpeg` to ntfy (with text in `X-Message` header) — but `solo.js` was passing `''`. Fixed by adding `captureMotionSnap()` helper (320px JPEG from live video, 0.6 quality) shared by both `fireNativeAlert` and the ntfy call. ntfy notifications now always include a low-res snapshot regardless of local recording/snapshot settings, so remote viewers can see what triggered the alert.
 
 ### Fixed (post-v1.118 — home screen polish + relic web index fix)

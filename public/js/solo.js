@@ -272,19 +272,24 @@ function analyzeFrame() {
 
     if (motionConsec >= consec && now >= lastAlertAt + cooldownSecs * 1000) {
       motionConsec = 0;
-      if (smartEnabled && soloCocoModel && !pendingSmartDetect) {
-        if (now >= lastSmartAt + SMART_COOLDOWN_MS) {
-          lastSmartAt        = now;
-          pendingSmartDetect = true;
-          runSmartDetect(video).then(matches => {
-            pendingSmartDetect = false;
-            if (matches && matches.length > 0) {
-              const best = matches.reduce((a, b) => a.score > b.score ? a : b);
-              onMotionDetected(best.class);
-            }
-          });
-        }
-      } else if (!smartEnabled || !soloCocoModel) {
+      if (smartEnabled && soloCocoModel && !pendingSmartDetect &&
+          now >= lastSmartAt + SMART_COOLDOWN_MS) {
+        // AI mode: run inference, use class label when confident, fall back to
+        // basic alert when AI draws a blank — AI labels rather than gates.
+        lastSmartAt        = now;
+        pendingSmartDetect = true;
+        runSmartDetect(video).then(matches => {
+          pendingSmartDetect = false;
+          if (matches && matches.length > 0) {
+            const best = matches.reduce((a, b) => a.score > b.score ? a : b);
+            onMotionDetected(best.class);
+          } else {
+            // AI found nothing recognized — still alert so motion isn't silently dropped.
+            onMotionDetected(null);
+          }
+        });
+      } else if (!smartEnabled || !soloCocoModel || pendingSmartDetect) {
+        // AI off, model not loaded yet, or previous inference still running → basic alert.
         onMotionDetected(null);
       }
     }
@@ -458,6 +463,36 @@ function fireNativeAlert(detectedClass) {
     : 'Motion detected';
   window.AndroidBridge.fireMotionAlert('CamNet Solo — ' + name, captureMotionSnap(), true, true);
 }
+
+// ── Stealth / incognito mode ───────────────────────────────────
+let soloStealthTapCount = 0;
+let soloStealthTapTimer = null;
+
+document.getElementById('soloStealthBtn').addEventListener('click', enterSoloStealth);
+
+async function enterSoloStealth() {
+  document.getElementById('soloStealthOverlay').style.display = 'block';
+  if (!wakeLock) await requestWakeLock();
+}
+
+function exitSoloStealth() {
+  soloStealthTapCount = 0;
+  clearTimeout(soloStealthTapTimer);
+  document.getElementById('soloStealthOverlay').style.display = 'none';
+}
+
+document.getElementById('soloStealthOverlay').addEventListener('click', () => {
+  soloStealthTapCount++;
+  clearTimeout(soloStealthTapTimer);
+  const hint = document.getElementById('soloStealthHint');
+  hint.style.color = '#444';
+  setTimeout(() => { hint.style.color = '#111'; }, 300);
+  if (soloStealthTapCount >= 3) {
+    exitSoloStealth();
+  } else {
+    soloStealthTapTimer = setTimeout(() => { soloStealthTapCount = 0; }, 2000);
+  }
+});
 
 // ── Flash / torch ──────────────────────────────────────────────
 function triggerMotionFlash() {

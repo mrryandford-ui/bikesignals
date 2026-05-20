@@ -326,9 +326,20 @@
         <div class="ctrl-icon">🔔</div>
         <span id="soloAlarmLabel">Silent</span>
       </button>
+      <button class="solo-ctrl-btn" id="soloStealthBtn">
+        <div class="ctrl-icon">🥷</div>
+        <span>Stealth</span>
+      </button>
     </div>
   </div>
 
+</div>
+
+<!-- Stealth overlay — full-screen black; tap 3× to exit -->
+<div id="soloStealthOverlay" style="display:none;position:fixed;inset:0;background:#000;z-index:9999;cursor:pointer;">
+  <div id="soloStealthHint" style="position:absolute;bottom:60px;width:100%;text-align:center;color:#111;font-size:13px;font-weight:600;transition:color 0.5s">
+    Tap 3× to exit stealth
+  </div>
 </div>
 
 <!-- ── Settings panel ──────────────────────────────────────────── -->
