@@ -39,6 +39,14 @@ class AndroidBridge(
         } catch (_: Exception) {}
     }
 
+    /** Returns the battery level as a percentage (0-100), or -1 if unavailable. */
+    @JavascriptInterface
+    fun getBatteryLevel(): Int = try {
+        val bm = context.getSystemService(android.content.Context.BATTERY_SERVICE)
+                as android.os.BatteryManager
+        bm.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY)
+    } catch (_: Exception) { -1 }
+
     /** Controls the device torch LED via CameraManager — more reliable than
      *  WebView getUserMedia track.applyConstraints on MediaTek/Samsung devices. */
     @JavascriptInterface
@@ -284,6 +292,20 @@ class AndroidBridge(
                 android.widget.Toast.makeText(context, "Could not load Solo mode: $e", android.widget.Toast.LENGTH_LONG).show()
             }
         }
+    }
+
+    /** Starts Monitor mode and auto-opens the Solo Admin panel (viewer.html#solo-admin). */
+    @JavascriptInterface
+    fun openSoloAdmin() {
+        startMonitor()   // starts Ktor server + loads viewer.html
+        // viewer.js detects #solo-admin in the hash and opens the panel on load
+        // The hash is appended by startMonitor() → loadUrl below via the existing fragment mechanism.
+        // We post a delayed JS injection to open the panel after the page loads.
+        val activity = context as? MainActivity ?: return
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            activity.webView.evaluateJavascript(
+                "if(typeof openPanel==='function') openPanel('soloAdminPanel');", null)
+        }, 3_000)
     }
 
     /**

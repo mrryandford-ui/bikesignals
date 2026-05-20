@@ -103,6 +103,7 @@ let ntfyUrl        = lsLoad('ntfyUrl',      '');
   await initMedia();
   restoreUI();
   if (smartEnabled) loadCocoModel().catch(() => {});
+  if (ntfyUrl.trim()) startCmdPolling(); // poll for remote commands even while disarmed
 })();
 
 // ── Media ──────────────────────────────────────────────────────
@@ -663,18 +664,20 @@ function soloCmdUrl() { const u = ntfyUrl.trim(); return u ? u.replace(/\/([^\/]
 async function sendSoloHeartbeat() {
   const url = soloHbUrl();
   if (!url) return;
+  const battery = window.AndroidBridge?.getBatteryLevel?.() ?? -1;
   const payload = JSON.stringify({
     armed,
     motionCount: soloMotionCount,
     lastAlertAt,
-    uptime: Date.now() - soloStartTime,
+    uptime:   Date.now() - soloStartTime,
+    battery,
   });
   try {
     await fetch(url, {
       method: 'POST',
       headers: {
         'Title': 'camnet-solo-hb',
-        'Priority': 'min',         // silent — no notification shown
+        'Priority': 'min',
         'Content-Type': 'text/plain; charset=utf-8',
       },
       body: payload,
@@ -706,10 +709,10 @@ async function pollSoloCommands() {
 function executeSoloCommand(cmd) {
   switch (cmd) {
     case 'arm':
-      if (!armed) document.getElementById('soloArmBtn').click();
+      if (!armed) setArmed(true);
       break;
     case 'disarm':
-      if (armed) document.getElementById('soloArmBtn').click();
+      if (armed) setArmed(false);
       break;
     case 'snapshot': {
       const snap = captureMotionSnap();
@@ -727,19 +730,27 @@ function executeSoloCommand(cmd) {
   }
 }
 
-function startRemoteAdmin() {
-  if (hbInterval) return;
-  sendSoloHeartbeat();                              // immediate on arm
-  hbInterval    = setInterval(sendSoloHeartbeat,   120_000);  // 30/hr — well under ntfy free limit
-  cmdPollTimer  = setInterval(pollSoloCommands,     10_000);
+// Command polling runs ALWAYS when ntfy is configured — even when disarmed —
+// so remote arm commands can be received. Heartbeat only runs when armed.
+function startCmdPolling() {
+  if (cmdPollTimer) return;
+  cmdPollTimer = setInterval(pollSoloCommands, 10_000);
 }
 
-function stopRemoteAdmin() {
-  clearInterval(hbInterval);   hbInterval   = null;
-  clearInterval(cmdPollTimer); cmdPollTimer = null;
-  // Send a final disarmed heartbeat so the admin panel reflects the state change
+function startHeartbeat() {
+  if (hbInterval) return;
   sendSoloHeartbeat();
+  hbInterval = setInterval(sendSoloHeartbeat, 120_000);
 }
+
+function stopHeartbeat() {
+  clearInterval(hbInterval); hbInterval = null;
+  sendSoloHeartbeat(); // final disarmed heartbeat so admin panel updates
+}
+
+// Kept for back-compat call sites
+function startRemoteAdmin() { startHeartbeat(); }
+function stopRemoteAdmin()  { stopHeartbeat(); }
 
 // ── Snapshot ───────────────────────────────────────────────────
 document.getElementById('soloSnapBtn').addEventListener('click', takeSnapshot);
@@ -1202,8 +1213,12 @@ document.getElementById('soloRecordIdleSeg').addEventListener('click', e => {
 });
 
 document.getElementById('soloNtfyUrl').addEventListener('change', e => {
-  ntfyUrl = e.target.value.trim();
+  let raw = e.target.value.trim();
+  if (raw && !raw.startsWith('http')) raw = 'https://ntfy.sh/' + raw;
+  ntfyUrl = raw;
+  e.target.value = raw;
   lsSave('ntfyUrl', ntfyUrl);
+  if (ntfyUrl && !cmdPollTimer) startCmdPolling();
 });
 
 document.getElementById('soloTestNotifBtn').addEventListener('click', () => {

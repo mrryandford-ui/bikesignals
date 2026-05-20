@@ -358,10 +358,21 @@ class MainActivity : AppCompatActivity() {
         <p class="tagline">Multi-phone security camera</p>
         <button class="btn primary"   onclick="AndroidBridge.startMonitor()">🖥&nbsp; Monitor</button>
         <button class="btn secondary" onclick="AndroidBridge.showCameraSetup()">📷&nbsp; Camera</button>
-        <button class="btn secondary" onclick="AndroidBridge.startSolo()"
-          style="background:transparent;border:1.5px solid #475569;color:#94a3b8;">
-          🎯&nbsp; Solo Mode
-        </button>
+        <div style="display:flex;gap:10px;width:100%">
+          <button onclick="AndroidBridge.startSolo()"
+            style="flex:1;padding:18px;border:none;border-radius:16px;font-size:17px;font-weight:700;
+                   cursor:pointer;text-align:center;background:transparent;
+                   border:1.5px solid #475569;color:#94a3b8;-webkit-tap-highlight-color:transparent">
+            🎯&nbsp; Solo Mode
+          </button>
+          <button onclick="AndroidBridge.openSoloAdmin()"
+            title="Solo device admin" aria-label="Solo admin"
+            style="padding:18px 16px;border:1.5px solid #334155;border-radius:16px;
+                   background:#0f172a;color:#64748b;font-size:20px;cursor:pointer;
+                   -webkit-tap-highlight-color:transparent;white-space:nowrap">
+            📡
+          </button>
+        </div>
         <button onclick="AndroidBridge.checkForUpdateManual()"
           style="background:transparent;border:1.5px solid #1e293b;color:#64748b;
                  font-size:13px;padding:10px;width:100%;border-radius:12px;

@@ -2728,6 +2728,7 @@ async function pollSoloDevice(device) {
         device.motionCount = data.motionCount ?? device.motionCount ?? 0;
         device.lastAlertAt = data.lastAlertAt ?? device.lastAlertAt ?? 0;
         device.uptime      = data.uptime;
+        device.battery     = data.battery ?? device.battery ?? -1;
       } catch (_) {}
     }
   } catch (_) {}
@@ -2742,13 +2743,16 @@ function renderSoloDeviceCard(device) {
   const label   = device.lastHb ? (age < 60_000 ? `${Math.floor(age/1000)}s ago` : `${Math.floor(age/60000)}m ago`) : 'Never';
   const armed   = device.armed ? '🟠 ARMED' : '⚪ DISARMED';
   const lastAl  = device.lastAlertAt ? new Date(device.lastAlertAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : '—';
+  const batPct  = device.battery >= 0 ? device.battery : null;
+  const batIcon = batPct === null ? '' : batPct > 60 ? '🔋' : batPct > 20 ? '🪫' : '🪫⚠';
+  const batStr  = batPct === null ? '' : ` · ${batIcon} ${batPct}%`;
   el.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
       <span style="font-weight:700;font-size:14px">${dot} ${escHtml(device.name)}</span>
       <span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px;background:var(--surface-2)">${armed}</span>
     </div>
     <div style="font-size:11px;color:var(--text-dim);margin-bottom:8px">
-      Last seen: ${label} &nbsp;·&nbsp; Alerts: ${device.motionCount ?? 0} &nbsp;·&nbsp; Last: ${lastAl}
+      Last seen: ${label} &nbsp;·&nbsp; Alerts: ${device.motionCount ?? 0} &nbsp;·&nbsp; Last: ${lastAl}${batStr}
     </div>
     <div style="display:flex;gap:6px;flex-wrap:wrap">
       <button onclick="sendSoloCommand(soloDevices.find(d=>d.id==='${device.id}'),'arm')"    class="sda-btn">🔴 Arm</button>
