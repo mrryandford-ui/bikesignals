@@ -62,6 +62,11 @@ CamNet is a peer-to-peer multi-phone LAN security camera app. One phone acts as 
 - ✅ **Two-way audio:** Monitor mic → all connected cameras. 🎤 header button; camera plays via hidden `<audio>`, shows "🎤 MONITOR" badge when active. Uses `sendrecv` transceiver + `replaceTrack`.
 - ✅ **DVR rolling buffer:** Per-camera 24/7 rolling 30-min buffer (1-min segments, 30 max). 📼 button per card; playback modal with segment list (newest first) and video player. Oldest segments auto-purged.
 
+### Solo Remote Admin (from Monitor)
+- ✅ **📡 Solo Devices panel in Monitor viewer:** Header button opens admin panel. Add any Solo device by ntfy topic URL + name. Per-device card shows: 🟢/🟡/🔴 online dot (based on heartbeat age), armed/disarmed state, last seen, alert count, last alert time. Action buttons: Arm, Disarm, 📸 Snapshot, Ping, ↻ Restart, ✕ Remove. Devices persisted in `localStorage camnet.solo.devices`. Poll interval: 15s.
+- ✅ **Solo heartbeat (solo.js):** When armed + ntfy configured, POSTs status JSON (`armed`, `motionCount`, `lastAlertAt`, `uptime`) to `{topic}-hb` every 60s with `Priority: min` (silent — no notification). Also sends immediate heartbeat on arm/disarm.
+- ✅ **Solo command channel (solo.js):** Polls `{topic}-cmd/json?poll=1` every 10s for commands from the Monitor panel. Commands: `arm`, `disarm`, `snapshot` (captures + sends via ntfy), `ping` (immediate heartbeat), `restart` (reloads solo.html in-place). Uses ntfy as bidirectional bus — no direct device-to-device connection needed.
+
 ### Solo Mode (Single Phone)
 - ✅ Standalone mode — no Wi-Fi, no Monitor phone, no Ktor server required
 - ✅ Arm/Disarm toggle with status badge and WATCHING indicator
@@ -687,4 +692,4 @@ camnet/
 
 ---
 
-**Last Updated:** May 2026 (post-v1.118 — ntfy snapshots, S24 freeze fix, Moto G update fix, home screen polish)
+**Last Updated:** May 2026 (post-v1.118 — Solo remote admin panel: heartbeat + ntfy command channel; S24 freeze fix; Moto G update fix; home screen polish)

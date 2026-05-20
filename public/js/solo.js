@@ -41,6 +41,7 @@ let facingMode     = 'environment';
 let mediaBusy      = false;
 let armed          = false;
 let wakeLock       = null;
+const soloStartTime = Date.now();
 
 // Motion
 let motionRunning  = false;
@@ -49,8 +50,14 @@ let motionCtx      = null;
 let motionPrev     = null;
 let motionConsec   = 0;
 let lastAlertAt    = 0;
+let soloMotionCount = 0;           // total alerts fired this session
 let pendingSmartDetect = false;
 let lastSmartAt    = 0;
+
+// Remote admin (heartbeat + command channel via ntfy)
+let hbInterval     = null;
+let cmdPollTimer   = null;
+let lastCmdSince   = Math.floor(Date.now() / 1000);
 
 // Recording
 const SEG_MS = 5 * 60 * 1000;
@@ -155,6 +162,7 @@ async function setArmed(on) {
     startMotionLoop();
     await requestWakeLock();
     window.AndroidBridge?.startStreaming?.();
+    if (ntfyUrl.trim()) startRemoteAdmin();
     setStatus('ARMED', 'Monitoring…');
     updateMotionIndicator();
   } else {
@@ -164,6 +172,7 @@ async function setArmed(on) {
     stopRecordingIfActive();
     clearTimeout(recordIdleTimer); recordIdleTimer = null;
     if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
+    stopRemoteAdmin();
     window.AndroidBridge?.stopStreaming?.();
     setStatus('DISARMED', 'Tap 🔴 to arm');
     updateMotionIndicator();
@@ -302,6 +311,7 @@ function analyzeFrame() {
 
 function onMotionDetected(detectedClass) {
   lastAlertAt = Date.now();
+  soloMotionCount++;
 
   // UI alert
   showAlertBanner(detectedClass);
@@ -631,6 +641,96 @@ function updateAlarmBtn() {
   btn.querySelector('.ctrl-icon').textContent = icons[alarmMode];
   document.getElementById('soloAlarmLabel').textContent = labels[alarmMode];
   btn.classList.toggle('active', alarmMode !== 'off');
+}
+
+// ── Remote admin — heartbeat + command channel ─────────────────
+// Heartbeat: POST minimal JSON to {ntfyUrl}-hb every 60s so the
+// Monitor's Solo Admin panel can show online/armed status.
+// Command poll: GET {ntfyUrl}-cmd/json?poll=1 every 10s for commands
+// sent by the Monitor admin panel.
+
+function soloHbUrl()  { const u = ntfyUrl.trim(); return u ? u.replace(/\/([^\/]+)$/, '/$1-hb')  : null; }
+function soloCmdUrl() { const u = ntfyUrl.trim(); return u ? u.replace(/\/([^\/]+)$/, '/$1-cmd') : null; }
+
+async function sendSoloHeartbeat() {
+  const url = soloHbUrl();
+  if (!url) return;
+  const payload = JSON.stringify({
+    armed,
+    motionCount: soloMotionCount,
+    lastAlertAt,
+    uptime: Date.now() - soloStartTime,
+  });
+  try {
+    await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Title': 'camnet-solo-hb',
+        'Priority': 'min',         // silent — no notification shown
+        'Content-Type': 'text/plain; charset=utf-8',
+      },
+      body: payload,
+    });
+  } catch (_) {}
+}
+
+async function pollSoloCommands() {
+  const url = soloCmdUrl();
+  if (!url) return;
+  const since = lastCmdSince;
+  lastCmdSince = Math.floor(Date.now() / 1000);
+  try {
+    const r = await fetch(`${url}/json?poll=1&since=${since}`, {
+      headers: { 'Accept': 'application/x-ndjson' },
+    });
+    const text = await r.text();
+    for (const line of text.trim().split('\n')) {
+      if (!line) continue;
+      try {
+        const msg = JSON.parse(line);
+        const cmd = (msg.title || '').trim().toLowerCase();
+        executeSoloCommand(cmd);
+      } catch (_) {}
+    }
+  } catch (_) {}
+}
+
+function executeSoloCommand(cmd) {
+  switch (cmd) {
+    case 'arm':
+      if (!armed) document.getElementById('soloArmBtn').click();
+      break;
+    case 'disarm':
+      if (armed) document.getElementById('soloArmBtn').click();
+      break;
+    case 'snapshot': {
+      const snap = captureMotionSnap();
+      const url  = ntfyUrl.trim();
+      if (url) window.AndroidBridge?.sendWebhookNotification?.(
+        url, 'Remote Snapshot — CamNet Solo', new Date().toLocaleTimeString(), snap || '');
+      break;
+    }
+    case 'ping':
+      sendSoloHeartbeat();
+      break;
+    case 'restart':
+      window.location.reload();
+      break;
+  }
+}
+
+function startRemoteAdmin() {
+  if (hbInterval) return;
+  sendSoloHeartbeat();                              // immediate on arm
+  hbInterval    = setInterval(sendSoloHeartbeat,    60_000);
+  cmdPollTimer  = setInterval(pollSoloCommands,     10_000);
+}
+
+function stopRemoteAdmin() {
+  clearInterval(hbInterval);   hbInterval   = null;
+  clearInterval(cmdPollTimer); cmdPollTimer = null;
+  // Send a final disarmed heartbeat so the admin panel reflects the state change
+  sendSoloHeartbeat();
 }
 
 // ── Snapshot ───────────────────────────────────────────────────

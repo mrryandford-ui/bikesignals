@@ -2678,3 +2678,120 @@ function startMonitorKeepAlive() {
       .finally(() => { connectWS(); startMonitorKeepAlive(); });
   }
 })();
+
+// ── Solo Admin Panel ───────────────────────────────────────────
+// Devices stored as: [{id, name, ntfyUrl, lastHb, armed, motionCount, lastAlertAt}]
+let soloDevices = [];
+let soloAdminPollTimer = null;
+const SOLO_HB_STALE_MS  = 120_000;   // yellow after 2 min
+const SOLO_HB_DEAD_MS   = 300_000;   // red after 5 min
+
+function lsLoadSoloDevices()  { try { return JSON.parse(localStorage.getItem('camnet.solo.devices') || '[]'); } catch { return []; } }
+function lsSaveSoloDevices()  { localStorage.setItem('camnet.solo.devices', JSON.stringify(soloDevices)); }
+
+function soloHbUrl(ntfyUrl)  { return ntfyUrl.replace(/\/([^\/]+)$/, '/$1-hb'); }
+function soloCmdUrl(ntfyUrl) { return ntfyUrl.replace(/\/([^\/]+)$/, '/$1-cmd'); }
+
+async function sendSoloCommand(device, cmd) {
+  try {
+    await fetch(soloCmdUrl(device.ntfyUrl), {
+      method: 'POST',
+      headers: { 'Title': cmd, 'Priority': 'high', 'Content-Type': 'text/plain' },
+      body: cmd,
+    });
+    showToast(`Sent "${cmd}" to ${device.name}`);
+  } catch (e) {
+    showToast(`Command failed: ${e.message}`);
+  }
+}
+
+async function pollSoloDevice(device) {
+  const since = device._lastPoll || Math.floor((Date.now() - 180_000) / 1000);
+  device._lastPoll = Math.floor(Date.now() / 1000);
+  try {
+    const r = await fetch(`${soloHbUrl(device.ntfyUrl)}/json?poll=1&since=${since}`);
+    if (!r.ok) return;
+    const text = await r.text();
+    for (const line of text.trim().split('\n')) {
+      if (!line) continue;
+      try {
+        const msg  = JSON.parse(line);
+        const data = JSON.parse(msg.message || '{}');
+        device.lastHb      = Date.now();
+        device.armed       = !!data.armed;
+        device.motionCount = data.motionCount ?? device.motionCount ?? 0;
+        device.lastAlertAt = data.lastAlertAt ?? device.lastAlertAt ?? 0;
+        device.uptime      = data.uptime;
+      } catch (_) {}
+    }
+  } catch (_) {}
+  renderSoloDeviceCard(device);
+}
+
+function renderSoloDeviceCard(device) {
+  const el = document.getElementById(`sdc-${device.id}`);
+  if (!el) return;
+  const age     = device.lastHb ? Date.now() - device.lastHb : Infinity;
+  const dot     = age < SOLO_HB_STALE_MS ? '🟢' : age < SOLO_HB_DEAD_MS ? '🟡' : '🔴';
+  const label   = device.lastHb ? (age < 60_000 ? `${Math.floor(age/1000)}s ago` : `${Math.floor(age/60000)}m ago`) : 'Never';
+  const armed   = device.armed ? '🟠 ARMED' : '⚪ DISARMED';
+  const lastAl  = device.lastAlertAt ? new Date(device.lastAlertAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : '—';
+  el.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+      <span style="font-weight:700;font-size:14px">${dot} ${escHtml(device.name)}</span>
+      <span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px;background:var(--surface-2)">${armed}</span>
+    </div>
+    <div style="font-size:11px;color:var(--text-dim);margin-bottom:8px">
+      Last seen: ${label} &nbsp;·&nbsp; Alerts: ${device.motionCount ?? 0} &nbsp;·&nbsp; Last: ${lastAl}
+    </div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap">
+      <button onclick="sendSoloCommand(soloDevices.find(d=>d.id==='${device.id}'),'arm')"    class="sda-btn">🔴 Arm</button>
+      <button onclick="sendSoloCommand(soloDevices.find(d=>d.id==='${device.id}'),'disarm')" class="sda-btn">✅ Disarm</button>
+      <button onclick="sendSoloCommand(soloDevices.find(d=>d.id==='${device.id}'),'snapshot')" class="sda-btn">📸 Snap</button>
+      <button onclick="sendSoloCommand(soloDevices.find(d=>d.id==='${device.id}'),'ping')"   class="sda-btn">Ping</button>
+      <button onclick="sendSoloCommand(soloDevices.find(d=>d.id==='${device.id}'),'restart')" class="sda-btn">↻ Restart</button>
+      <button onclick="removeSoloDevice('${device.id}')" class="sda-btn sda-danger">✕</button>
+    </div>`;
+}
+
+function buildSoloDeviceList() {
+  const list = document.getElementById('soloDeviceList');
+  list.innerHTML = soloDevices.length === 0
+    ? '<p style="color:var(--text-dim);font-size:13px;text-align:center">No Solo devices added yet.</p>'
+    : soloDevices.map(d => `
+        <div id="sdc-${d.id}" style="background:var(--surface-2);border:1.5px solid var(--border);
+             border-radius:12px;padding:12px">Loading…</div>`).join('');
+  soloDevices.forEach(d => renderSoloDeviceCard(d));
+}
+
+function removeSoloDevice(id) {
+  soloDevices = soloDevices.filter(d => d.id !== id);
+  lsSaveSoloDevices();
+  buildSoloDeviceList();
+}
+
+function startSoloAdminPolling() {
+  if (soloAdminPollTimer) return;
+  soloDevices.forEach(pollSoloDevice);
+  soloAdminPollTimer = setInterval(() => soloDevices.forEach(pollSoloDevice), 15_000);
+}
+
+document.getElementById('soloAdminBtn').addEventListener('click', () => {
+  soloDevices = lsLoadSoloDevices();
+  buildSoloDeviceList();
+  startSoloAdminPolling();
+  openPanel('soloAdminPanel');
+});
+
+document.getElementById('soloAdminAddBtn').addEventListener('click', () => {
+  const url  = document.getElementById('soloAdminUrl').value.trim();
+  const name = document.getElementById('soloAdminName').value.trim() || 'Solo Device';
+  if (!url || !url.startsWith('http')) { showToast('Enter a valid ntfy topic URL'); return; }
+  const id = Math.random().toString(36).slice(2, 9);
+  soloDevices.push({ id, name, ntfyUrl: url, lastHb: null, armed: false, motionCount: 0, lastAlertAt: 0 });
+  lsSaveSoloDevices();
+  document.getElementById('soloAdminUrl').value  = '';
+  document.getElementById('soloAdminName').value = '';
+  buildSoloDeviceList();
+  pollSoloDevice(soloDevices[soloDevices.length - 1]);
+});

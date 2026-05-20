@@ -40,6 +40,7 @@
       <span id="wsStatusText">Connecting…</span>
     </div>
     <button class="icon-btn" id="monitorMicBtn" title="Speak to all cameras (monitor mic off)">🎤</button>
+    <button class="icon-btn" id="soloAdminBtn" title="Solo device admin">📡</button>
     <button class="icon-btn" id="layoutBtn" title="Change layout">⊞</button>
     <button class="icon-btn" id="sessionBtn" title="Session info">🔑</button>
     <button class="icon-btn" id="settingsBtn" title="Settings">⚙</button>
@@ -220,6 +221,33 @@
     <div class="panel-header"><span class="panel-title">Rename Camera</span><button class="panel-close" data-close="renamePanel">✕</button></div>
     <input type="text" id="renameInput" placeholder="Camera name" maxlength="30" style="margin-bottom:14px;">
     <button class="btn btn-primary" id="renameConfirmBtn" style="width:100%;">Save</button>
+  </div>
+</div>
+
+<!-- Solo Admin Panel -->
+<div class="panel hidden" id="soloAdminPanel">
+  <div class="panel-backdrop" data-close="soloAdminPanel"></div>
+  <div class="panel-sheet">
+    <div class="panel-handle"></div>
+    <div class="panel-header">
+      <span class="panel-title">📡 Solo Devices</span>
+      <button class="panel-close" data-close="soloAdminPanel">✕</button>
+    </div>
+    <div id="soloDeviceList" style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px"></div>
+    <div class="panel-section">
+      <div class="panel-section-heading">Add Solo Device</div>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">
+        <input id="soloAdminUrl"  type="url"  placeholder="https://ntfy.sh/YourTopic"
+          style="width:100%;padding:10px 12px;background:var(--surface-2);border:1.5px solid var(--border);
+                 border-radius:10px;color:var(--text);font-size:14px;box-sizing:border-box">
+        <input id="soloAdminName" type="text" placeholder="Device name (e.g. Kitchen)"
+          style="width:100%;padding:10px 12px;background:var(--surface-2);border:1.5px solid var(--border);
+                 border-radius:10px;color:var(--text);font-size:14px;box-sizing:border-box">
+        <button id="soloAdminAddBtn"
+          style="padding:12px;background:var(--accent);color:#fff;border:none;border-radius:10px;
+                 font-size:14px;font-weight:700;cursor:pointer">Add Device</button>
+      </div>
+    </div>
   </div>
 </div>
 
